@@ -1,6 +1,8 @@
 package core
 
 import (
+	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -179,4 +181,36 @@ func (t *Task) Validate() error {
 // AttemptsExhausted reports whether the current step may not be retried again.
 func (t *Task) AttemptsExhausted() bool {
 	return t.Attempts >= t.MaxAttempts
+}
+
+// StepsMetadataKey is the Task.Metadata key holding an ad hoc, per-task
+// ordered step (agent name) list, as an alternative to a named workflow
+// declared in configuration. It lets a caller (the web UI's step
+// checkboxes, for instance) compose a one-off pipeline — "developer" alone,
+// or "developer,qa", or "developer,qa,devops" — without requiring an
+// operator to pre-declare every combination as a named workflow.
+const StepsMetadataKey = "steps"
+
+// EncodeSteps JSON-encodes an ad hoc step list for storage in
+// Task.Metadata[StepsMetadataKey].
+func EncodeSteps(steps []string) (string, error) {
+	b, err := json.Marshal(steps)
+	if err != nil {
+		return "", fmt.Errorf("encode steps: %w", err)
+	}
+	return string(b), nil
+}
+
+// DecodeSteps reads an ad hoc step list from a task's metadata. ok is false
+// when the task carries no ad hoc steps (it uses a named workflow or a
+// single direct agent instead), which is not an error.
+func DecodeSteps(metadata map[string]string) (steps []string, ok bool, err error) {
+	raw, present := metadata[StepsMetadataKey]
+	if !present || raw == "" {
+		return nil, false, nil
+	}
+	if err := json.Unmarshal([]byte(raw), &steps); err != nil {
+		return nil, false, fmt.Errorf("decode steps: %w", err)
+	}
+	return steps, true, nil
 }

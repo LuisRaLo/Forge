@@ -357,15 +357,32 @@ func (s *Scheduler) rewind(ctx context.Context, t *core.Task, def *core.AgentDef
 	}
 }
 
-// stepInfo resolves a task's workflow steps and whether it is on the last
-// one. A direct (non-workflow) task is treated as a single-step workflow.
-func (s *Scheduler) stepInfo(t *core.Task) (steps []string, last bool, err error) {
-	if t.Workflow == "" {
-		return []string{t.Agent}, true, nil
+// resolveSteps returns a task's ordered step (agent name) list, in order of
+// precedence: an ad hoc list carried on the task itself
+// (core.StepsMetadataKey — see tasks.CreateParams.Steps), a named workflow
+// looked up by t.Workflow, or — for a direct, single-agent task with
+// neither — just t.Agent alone.
+func (s *Scheduler) resolveSteps(t *core.Task) ([]string, error) {
+	if steps, ok, err := core.DecodeSteps(t.Metadata); err != nil {
+		return nil, fmt.Errorf("task %s: %w", t.ID, err)
+	} else if ok {
+		return steps, nil
 	}
-	steps, err = s.deps.Workflows.Steps(t.Workflow)
+	if t.Workflow == "" {
+		return []string{t.Agent}, nil
+	}
+	steps, err := s.deps.Workflows.Steps(t.Workflow)
 	if err != nil {
-		return nil, false, fmt.Errorf("resolve workflow %s: %w", t.Workflow, err)
+		return nil, fmt.Errorf("resolve workflow %s: %w", t.Workflow, err)
+	}
+	return steps, nil
+}
+
+// stepInfo resolves a task's steps and whether it is on the last one.
+func (s *Scheduler) stepInfo(t *core.Task) (steps []string, last bool, err error) {
+	steps, err = s.resolveSteps(t)
+	if err != nil {
+		return nil, false, err
 	}
 	return steps, t.Step >= len(steps)-1, nil
 }

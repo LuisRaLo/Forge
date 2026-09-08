@@ -457,3 +457,86 @@ func TestRejectSensitiveRepositoryDirectly(t *testing.T) {
 		t.Errorf("an ordinary project directory must not be rejected: %v", err)
 	}
 }
+
+func TestCreateWithAdHocSteps(t *testing.T) {
+	t.Parallel()
+	svc, _ := newTestService(t)
+
+	task, err := svc.Create(context.Background(), CreateParams{
+		Title: "ad hoc", Steps: []string{"developer", "qa"},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if task.Agent != "developer" {
+		t.Errorf("expected the first ad hoc step as the agent, got %q", task.Agent)
+	}
+	steps, ok, err := core.DecodeSteps(task.Metadata)
+	if err != nil {
+		t.Fatalf("decode steps: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected ad hoc steps to be recorded in metadata")
+	}
+	if len(steps) != 2 || steps[0] != "developer" || steps[1] != "qa" {
+		t.Errorf("unexpected steps: %v", steps)
+	}
+}
+
+func TestCreateRejectsMultipleStepSources(t *testing.T) {
+	t.Parallel()
+	svc, _ := newTestService(t)
+	ctx := context.Background()
+
+	_, err := svc.Create(ctx, CreateParams{Title: "t", Workflow: "feature", Steps: []string{"developer"}})
+	if !errors.Is(err, core.ErrValidation) {
+		t.Fatalf("expected ErrValidation, got %v", err)
+	}
+	_, err = svc.Create(ctx, CreateParams{Title: "t", Agent: "developer", Steps: []string{"developer"}})
+	if !errors.Is(err, core.ErrValidation) {
+		t.Fatalf("expected ErrValidation, got %v", err)
+	}
+}
+
+func TestCreateRejectsUnknownAdHocStep(t *testing.T) {
+	t.Parallel()
+	svc, _ := newTestService(t)
+
+	_, err := svc.Create(context.Background(), CreateParams{
+		Title: "t", Steps: []string{"developer", "ghost"},
+	})
+	if !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestCreateRejectsEmptyStepName(t *testing.T) {
+	t.Parallel()
+	svc, _ := newTestService(t)
+
+	_, err := svc.Create(context.Background(), CreateParams{
+		Title: "t", Steps: []string{"developer", "  "},
+	})
+	if !errors.Is(err, core.ErrValidation) {
+		t.Fatalf("expected ErrValidation, got %v", err)
+	}
+}
+
+func TestCreateAdHocStepsDoesNotMutateCallerMetadata(t *testing.T) {
+	t.Parallel()
+	svc, _ := newTestService(t)
+
+	original := map[string]string{"source": "ui"}
+	task, err := svc.Create(context.Background(), CreateParams{
+		Title: "t", Steps: []string{"developer"}, Metadata: original,
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, present := original[core.StepsMetadataKey]; present {
+		t.Fatal("Create must not mutate the caller's metadata map")
+	}
+	if task.Metadata["source"] != "ui" {
+		t.Error("caller-supplied metadata must survive alongside the encoded steps")
+	}
+}

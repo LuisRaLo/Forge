@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -59,6 +60,11 @@ type CreateParams struct {
 	Branch      string
 	Workflow    string
 	Agent       string
+	// Steps is an ad hoc, ordered list of agent names — an alternative to
+	// Workflow for a one-off pipeline (e.g. ["developer", "qa"]) composed at
+	// creation time rather than pre-declared in configuration. Stored on the
+	// task itself (core.StepsMetadataKey), not tied to a named workflow.
+	Steps       []string
 	Priority    core.Priority
 	MaxAttempts int
 	ParentTask  string
@@ -71,8 +77,9 @@ type CreateParams struct {
 
 // Create validates the request and inserts a PENDING task.
 //
-// Exactly one of Workflow or Agent must be given: a task either follows a
-// declared step sequence or targets a single agent directly.
+// Exactly one of Workflow, Agent, or Steps must be given: a task follows a
+// declared step sequence, targets a single agent directly, or follows an ad
+// hoc step sequence composed for this task alone.
 func (s *Service) Create(ctx context.Context, p CreateParams) (*core.Task, error) {
 	if p.IdempotencyKey != "" {
 		existing, err := s.repo.GetByIdempotencyKey(ctx, p.IdempotencyKey)
@@ -92,22 +99,45 @@ func (s *Service) Create(ctx context.Context, p CreateParams) (*core.Task, error
 
 	hasWorkflow := strings.TrimSpace(p.Workflow) != ""
 	hasAgent := strings.TrimSpace(p.Agent) != ""
+	hasSteps := len(p.Steps) > 0
 	switch {
-	case hasWorkflow && hasAgent:
+	case boolCount(hasWorkflow, hasAgent, hasSteps) > 1:
 		return nil, core.Invalid("workflow",
-			"specify either a workflow or a single agent, not both")
-	case !hasWorkflow && !hasAgent:
+			"specify exactly one of a workflow, a single agent, or an ad hoc step list")
+	case !hasWorkflow && !hasAgent && !hasSteps:
 		return nil, core.Invalid("workflow",
-			"specify a workflow (--workflow) or a single agent (--agent)")
+			"specify a workflow (--workflow), a single agent (--agent), or a step list")
 	}
 
 	firstAgent := p.Agent
-	if hasWorkflow {
+	metadata := p.Metadata
+	switch {
+	case hasWorkflow:
 		steps, err := s.resolveWorkflow(p.Workflow)
 		if err != nil {
 			return nil, err
 		}
 		firstAgent = steps[0]
+	case hasSteps:
+		for i, name := range p.Steps {
+			if strings.TrimSpace(name) == "" {
+				return nil, core.Invalidf("steps", "step %d must not be empty", i)
+			}
+			if err := s.checkAgentExists(name); err != nil {
+				return nil, err
+			}
+		}
+		encoded, err := core.EncodeSteps(p.Steps)
+		if err != nil {
+			return nil, err
+		}
+		if metadata == nil {
+			metadata = map[string]string{}
+		} else {
+			metadata = maps.Clone(metadata)
+		}
+		metadata[core.StepsMetadataKey] = encoded
+		firstAgent = p.Steps[0]
 	}
 	if err := s.checkAgentExists(firstAgent); err != nil {
 		return nil, err
@@ -149,9 +179,21 @@ func (s *Service) Create(ctx context.Context, p CreateParams) (*core.Task, error
 		MaxAttempts:    maxAttempts,
 		ParentTaskID:   parent,
 		IdempotencyKey: p.IdempotencyKey,
-		Metadata:       p.Metadata,
+		Metadata:       metadata,
 	}
 	return s.repo.Create(ctx, t)
+}
+
+// boolCount returns how many of the given booleans are true, so Create can
+// enforce "exactly one of workflow/agent/steps" without a chain of &&/||.
+func boolCount(bs ...bool) int {
+	n := 0
+	for _, b := range bs {
+		if b {
+			n++
+		}
+	}
+	return n
 }
 
 // Get returns a task by identifier.

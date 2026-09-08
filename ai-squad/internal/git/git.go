@@ -171,7 +171,7 @@ func parseWorktreeList(out string) []WorktreeEntry {
 	flush()
 	return entries
 }
-sabe
+
 // Commit stages every change in dir and commits it. An empty diff (nothing
 // to commit) is not an error: it is reported via the bool return so callers
 // can treat "nothing changed" as success rather than parsing git's message.

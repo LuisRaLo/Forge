@@ -3,6 +3,7 @@ module github.com/LuisRaLo/ai-squad
 go 1.27.1
 
 require (
+	github.com/coder/websocket v1.8.15
 	github.com/spf13/cobra v1.10.2
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.58.0

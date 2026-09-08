@@ -61,15 +61,15 @@ func (s *Scheduler) claim(ctx context.Context, t *core.Task) (*core.Task, error)
 }
 
 // isFirstOfMultiStepWorkflow reports whether t is sitting at step 0 of a
-// workflow with more than one step, which is the only case that claims into
-// PLANNING rather than RUNNING.
+// multi-step pipeline — named workflow or ad hoc step list alike — which is
+// the only case that claims into PLANNING rather than RUNNING.
 func (s *Scheduler) isFirstOfMultiStepWorkflow(t *core.Task) (bool, error) {
-	if t.Workflow == "" || t.Step != 0 {
+	if t.Step != 0 {
 		return false, nil
 	}
-	steps, err := s.deps.Workflows.Steps(t.Workflow)
+	steps, err := s.resolveSteps(t)
 	if err != nil {
-		return false, fmt.Errorf("resolve workflow %s for task %s: %w", t.Workflow, t.ID, err)
+		return false, err
 	}
 	return len(steps) > 1, nil
 }

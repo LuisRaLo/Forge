@@ -174,6 +174,13 @@ func qaAgent() *core.AgentDefinition {
 	}
 }
 
+func devopsAgent() *core.AgentDefinition {
+	return &core.AgentDefinition{
+		Name: "devops", Runtime: "mock", SystemPrompt: "p",
+		Permissions: core.Permissions{Filesystem: core.FSWorkspace, Network: true},
+	}
+}
+
 func architectAgent() *core.AgentDefinition {
 	return &core.AgentDefinition{
 		Name: "architect", Runtime: "mock", SystemPrompt: "p", ArtifactName: "plan",
@@ -736,4 +743,76 @@ func TestRunOnceReturnsImmediatelyWhenNothingToDo(t *testing.T) {
 	if elapsed := time.Since(start); elapsed > time.Second {
 		t.Fatalf("RunOnce with no work should return promptly, took %s", elapsed)
 	}
+}
+
+func TestAdHocStepsRunTheChosenPipeline(t *testing.T) {
+	t.Parallel()
+	env := newTestEnv(t, Config{}, devAgent(), qaAgent(), devopsAgent())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// QA passes: dev -> qa -> devops, exactly the pipeline the caller
+	// composed at task-creation time — this is the "dev + qa + deploy"
+	// checkbox combination, expressed as an ad hoc step list rather than a
+	// pre-declared named workflow.
+	env.runtime.Script(mock.Response{
+		Match:  struct{ Agent, TaskID string }{Agent: "qa"},
+		Result: &core.RunResult{StopReason: "end_turn", Structured: json.RawMessage(`{"passed":true}`)},
+	})
+
+	task := env.svc.create(t, ctx, &core.Task{
+		Title: "ad hoc pipeline", Repository: "/repo", Agent: "developer",
+		Metadata: mustEncodeSteps(t, "developer", "qa", "devops"),
+	})
+
+	go env.sched.Run(ctx)
+
+	waitFor(t, 3*time.Second, func() bool {
+		got, err := env.tasks.Get(ctx, task.ID)
+		return err == nil && got.Status == core.StatusCompleted
+	})
+
+	var order []string
+	for _, c := range env.runtime.Calls() {
+		if c.TaskID == task.ID {
+			order = append(order, c.Agent.Name)
+		}
+	}
+	want := []string{"developer", "qa", "devops"}
+	if len(order) != len(want) {
+		t.Fatalf("expected %v, got %v", want, order)
+	}
+	for i := range want {
+		if order[i] != want[i] {
+			t.Fatalf("expected order %v, got %v", want, order)
+		}
+	}
+}
+
+func TestAdHocSingleStepBehavesLikeDirectAgent(t *testing.T) {
+	t.Parallel()
+	env := newTestEnv(t, Config{}, devAgent())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	task := env.svc.create(t, ctx, &core.Task{
+		Title: "solo dev", Repository: "/repo", Agent: "developer",
+		Metadata: mustEncodeSteps(t, "developer"),
+	})
+
+	go env.sched.Run(ctx)
+
+	waitFor(t, 2*time.Second, func() bool {
+		got, err := env.tasks.Get(ctx, task.ID)
+		return err == nil && got.Status == core.StatusCompleted
+	})
+}
+
+func mustEncodeSteps(t *testing.T, steps ...string) map[string]string {
+	t.Helper()
+	encoded, err := core.EncodeSteps(steps)
+	if err != nil {
+		t.Fatalf("encode steps: %v", err)
+	}
+	return map[string]string{core.StepsMetadataKey: encoded}
 }
