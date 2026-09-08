@@ -9,13 +9,17 @@ several, reached through an adapter; nothing in the core imports it.
 
 ## Status
 
-**Phase 3 of 8 is complete.** What works today: configuration, agent
-definitions, the task model and its state machine, persistence with crash
-recovery, the CLI, the `AgentRuntime` port, a scriptable `MockRuntime`, a
-`ClaudeCodeRuntime` adapter verified end to end against the real installed
-CLI (see `docs/architecture.md`), and isolated per-task git worktrees with
-crash-safe reuse. Nothing schedules a task onto an agent yet — that is
-Phase 4.
+**Phase 5 of 8 is complete.** The full local pipeline runs:
+`ai-squad task create --workflow feature` queues a task, `ai-squad worker
+start` (single pass) or `ai-squad daemon` (continuous) claims it, executes
+each workflow step under a bounded worker pool, evaluates QA's pass/fail
+gate and loops it back to the developer on failure (bounded by
+`limits.max_step_iterations`, falling to `BLOCKED` if never resolved), and
+recovers cleanly from a killed process. See
+`docs/architecture.md#phase-45-the-scheduler-and-workflow-engine-built-together`
+for how the scheduler's transitions map onto the state machine, and for a
+real git-level concurrency bug the test suite caught and fixed along the
+way.
 
 ## Architecture
 
@@ -97,6 +101,17 @@ go build -o ai-squad ./cmd/ai-squad
 
 ./ai-squad task list
 ./ai-squad task show TASK-1
+
+# Run it: a single pass drains whatever is currently claimable, then exits.
+./ai-squad worker start
+
+# Or run continuously until Ctrl+C:
+./ai-squad daemon
+
+./ai-squad worker status
+./ai-squad logs TASK-1
+./ai-squad agent run developer TASK-1   # run one agent step manually, for debugging
+./ai-squad approve TASK-1               # WAITING_APPROVAL -> COMPLETED; never deploys itself
 ```
 
 An installation is self-contained: the database, agent definitions and
@@ -149,8 +164,8 @@ Real providers are never required to run the suite.
 | 1 | CLI, SQLite, task model, state machine, config  | done |
 | 2 | `AgentRuntime` port, mock runtime, Claude Code adapter | done |
 | 3 | Git worktrees, workspace manager | done |
-| 4 | Scheduler, worker pool, concurrency, recovery | next |
-| 5 | QA, reviewer, workflows, feedback loops | |
+| 4 | Scheduler, worker pool, concurrency, recovery | done |
+| 5 | QA, reviewer, workflows, feedback loops | done |
 | 6 | Ollama, DeepSeek, OpenAI-compatible providers | |
 | 7 | GitHub, CI, pull requests, human approval | |
 | 8 | Security hardening, audit logs, cost controls | |

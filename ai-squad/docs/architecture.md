@@ -214,6 +214,94 @@ when to persist `WorkspacePath`/`Branch` via the existing
 `Transition` mutator. That is what makes the package testable with real git
 repositories and zero database setup.
 
+## Phase 4+5: the scheduler and workflow engine, built together
+
+Phase 4 ("Scheduler, worker pool, concurrency, recovery") and Phase 5
+("QA, reviewer, workflows, feedback loops") are the user's own phase split,
+but implementing Phase 4 as single-step-only and then bolting multi-step
+chaining onto it in Phase 5 would mean rewriting the claim/advance logic
+twice. They were built as one engine (`internal/scheduler`), covering both
+phases' scope, so nothing here was thrown away.
+
+### The state machine forces REVIEW, not READY, after RUNNING
+
+`RUNNING`'s allowed targets are `{REVIEW, WAITING, WAITING_APPROVAL,
+COMPLETED, FAILED, BLOCKED, CANCELLED}` — `READY` is not among them, by the
+design proven in Phase 1's own state-machine tests (`FAILED -> RUNNING is
+rejected: a retry re-queues, so the scheduler stays the only component that
+starts work` applies symmetrically to `RUNNING -> READY`). The first
+scheduler implementation tried `RUNNING -> READY` directly for retries, the
+QA-fail rewind, and workflow advancement, and the test suite rejected every
+one of them with `cannot transition RUNNING -> READY` — the exact kind of
+guard rail the state machine exists to provide.
+
+The fix uses the machine as designed rather than fighting it: a successful
+`RUNNING` step always advances into `REVIEW` (which `REVIEW -> RUNNING`
+then claims for the *next* step — any next step, not only a QA-gated one;
+"REVIEW" is the state machine's name for "a RUNNING step's output is queued
+for the next step's claim," used universally, not literally implying human
+review every time). A retry or a QA-fail rewind — which need to return an
+executing task to `READY` — go through the `RUNNING -> WAITING -> READY`
+hop, since `WAITING` borders both. `PLANNING` (used only for a multi-step
+workflow's first step) has a direct edge to `READY` and needs no hop.
+
+### The QA feedback loop
+
+An agent with `gate: {enabled: true, steps_back: N}` in its YAML (only `qa`
+ships with one) must return structured output shaped `{"passed": bool,
+"summary": string}`. The scheduler requests this via
+`RunRequest.OutputSchema`, and on a failed gate sends the task back `N`
+workflow steps (position-based, not by agent name, so the mechanism is not
+hardcoded to any particular role) instead of forward. A per-gate iteration
+counter lives in `task.Metadata["loop:<agent>"]`, checked against
+`limits.max_step_iterations`; exhausting it produces `BLOCKED` rather than
+looping forever. `TestQAFailureLoopsBackToDeveloperThenSucceeds` and
+`TestQAFailureExhaustsIterationsAndBlocks` assert both the loop and its
+bound directly, and an end-to-end CLI smoke test against the built binary
+(worker start, real state transitions, real audit log) confirmed the same
+behaviour outside the unit-test harness.
+
+Because a gate step's parsed verdict is what drives control flow, an
+unparseable structured-output response is a **hard error** for that step
+(`FAILED`, not a silent pass/fail guess) — matching Phase 2's own
+unresolved finding that Claude Code's `--json-schema` support was not fully
+verified live. A non-gated step's raw text is instead wrapped in a minimal
+JSON envelope (`{"text": "..."}`) for artifact storage, which is always
+valid regardless of what the agent said, rather than assuming every step
+returns clean structured JSON.
+
+### Recovery has two layers
+
+1. **Immediate, on every start** (`recoverInterrupted`): every `PLANNING`/
+   `RUNNING` task is reclaimed unconditionally, because a freshly started
+   process has zero live worker goroutines by definition — anything Active
+   in the database was left behind by a process that is no longer running.
+   This alone satisfies "`ai-squad daemon` restart → recover → continue."
+2. **A runtime reaper** (`reapStale`), defense in depth for a single
+   long-running daemon: an Active task whose `UpdatedAt` is older than its
+   own step timeout plus `scheduler.lease_duration` (the grace period) is
+   presumed abandoned by a hung goroutine that never reached its own
+   timeout — a bug the panic-recovering worker loop did not catch — and is
+   reclaimed without needing the whole process to have crashed.
+
+### A real concurrency bug the test suite caught, in git itself
+
+Running the full suite repeatedly surfaced a flaky failure in
+`internal/workspace`'s existing 12-way concurrent-worktree test: `git
+worktree add`'s own administrative bookkeeping
+(`.git/worktrees/<name>/commondir`) is not safe under many concurrent
+`worktree add` invocations against the *same* repository once real system
+load (the rest of the suite's own git subprocesses) was added to the mix —
+it passed 5/5 in isolation and failed intermittently only under full-suite
+pressure. This is a race in git's own state, not in this project's Go code,
+but from the orchestrator's perspective a task's workspace creation must
+never be corrupted by a concurrent task's, so `workspace.Manager` now holds
+a second, per-repository mutex serializing `git worktree add`/`remove`
+calls against one repository (a separate lock from the existing per-task
+one, which only protects one task's own `Acquire`/`Release` against being
+invoked twice). Two different repositories are unaffected and still proceed
+in parallel. Confirmed by re-running the full suite repeatedly afterward.
+
 ## Deferred deliberately
 
 - **Worktree management** (Phase 3). One workspace per task, never shared.
