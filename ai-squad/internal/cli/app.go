@@ -10,20 +10,23 @@ import (
 	"github.com/santillana/ai-squad/internal/agents"
 	"github.com/santillana/ai-squad/internal/config"
 	"github.com/santillana/ai-squad/internal/core"
+	"github.com/santillana/ai-squad/internal/git"
 	"github.com/santillana/ai-squad/internal/runtimes"
 	"github.com/santillana/ai-squad/internal/storage"
 	"github.com/santillana/ai-squad/internal/tasks"
+	"github.com/santillana/ai-squad/internal/workspace"
 )
 
 // App holds the dependencies a command needs. It is constructed per command
 // invocation rather than kept in package state, so nothing global is shared.
 type App struct {
-	Cfg      *config.Config
-	DB       *storage.DB
-	Repo     core.TaskRepository
-	Agents   *agents.Registry
-	Runtimes *runtimes.Registry
-	Tasks    *tasks.Service
+	Cfg        *config.Config
+	DB         *storage.DB
+	Repo       core.TaskRepository
+	Agents     *agents.Registry
+	Runtimes   *runtimes.Registry
+	Workspaces *workspace.Manager
+	Tasks      *tasks.Service
 }
 
 // workflows adapts the configuration to the tasks.Workflows interface, so the
@@ -87,6 +90,14 @@ func open(ctx context.Context, configPath string) (*App, error) {
 		return nil, err
 	}
 
+	workspaces, err := workspace.NewManager(workspace.Options{
+		Root: filepath.Join(cfg.System.DataDir, "worktrees"),
+	}, git.New())
+	if err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+
 	repo := storage.NewTaskRepo(db, core.SystemClock)
 	svc, err := tasks.NewService(repo, registry, workflows{cfg: cfg}, tasks.Options{
 		DefaultMaxAttempts: cfg.Limits.MaxTaskAttempts,
@@ -97,7 +108,8 @@ func open(ctx context.Context, configPath string) (*App, error) {
 	}
 
 	return &App{
-		Cfg: cfg, DB: db, Repo: repo, Agents: registry, Runtimes: runtimeRegistry, Tasks: svc,
+		Cfg: cfg, DB: db, Repo: repo, Agents: registry, Runtimes: runtimeRegistry,
+		Workspaces: workspaces, Tasks: svc,
 	}, nil
 }
 

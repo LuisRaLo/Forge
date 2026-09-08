@@ -178,6 +178,42 @@ documented, unmanaged CLI contract, but **not independently confirmed against
 a policy-managed account** — that remains open, flagged in code, rather than
 asserted.
 
+## Phase 3: workspace isolation
+
+`internal/workspace.Manager` sits on top of `internal/git`, a thin CLI
+wrapper (worktree add/remove/list, extended in Phase 7 with
+commit/push/PR-adjacent operations rather than built out speculatively now).
+
+Two different tasks are kept from ever touching the same worktree by
+construction, not by a lock this package invents: each task's path and
+branch derive from its own unique task ID (`<data_dir>/worktrees/task-N`,
+branch `ai-squad/task-n`), and only the worker that won that task's
+`core.TaskRepository.Transition` to RUNNING/PLANNING — proven single-winner
+by the Phase 1 concurrency tests — ever calls `Acquire` for it. `Manager`'s
+own per-task mutex exists only to make repeated `Acquire`/`Release` calls for
+the *same* task safe against being invoked twice concurrently within one
+process, which the state machine does not by itself rule out.
+`TestConcurrentAcquireDifferentTasks` and `TestConcurrentAcquireSameTask`
+assert both properties against real, on-disk git repositories rather than a
+mock.
+
+`Acquire` is idempotent: if a task's `WorkspacePath` already names a
+worktree git still has registered, it is returned as-is rather than
+recreated. This is what lets a task recovered after a crash resume in the
+same workspace instead of losing uncommitted work sitting on disk —
+`TestAcquireIsIdempotent` seeds an in-progress file and asserts it survives
+a second `Acquire`. Deletion is conservative in the same spirit: if a path is
+occupied by something that is *not* a registered git worktree, `Acquire`
+refuses to touch it rather than silently overwriting what might be a
+crash artifact or manual tampering — consistent with this project's own rule
+against surprise destructive defaults.
+
+`Manager` never touches `core.Task` or the database; it returns a
+`Workspace` value and lets the caller — the scheduler in Phase 4 — decide
+when to persist `WorkspacePath`/`Branch` via the existing
+`Transition` mutator. That is what makes the package testable with real git
+repositories and zero database setup.
+
 ## Deferred deliberately
 
 - **Worktree management** (Phase 3). One workspace per task, never shared.

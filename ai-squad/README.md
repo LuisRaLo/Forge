@@ -9,14 +9,13 @@ several, reached through an adapter; nothing in the core imports it.
 
 ## Status
 
-**Phase 2 of 8 is complete.** What works today: configuration, agent
+**Phase 3 of 8 is complete.** What works today: configuration, agent
 definitions, the task model and its state machine, persistence with crash
-recovery, the CLI, the `AgentRuntime` port, a scriptable `MockRuntime`, and a
+recovery, the CLI, the `AgentRuntime` port, a scriptable `MockRuntime`, a
 `ClaudeCodeRuntime` adapter verified end to end against the real installed
-CLI — including two bugs it found and fixed (see
-`docs/architecture.md#phase-2-what-live-testing-against-claude-code-actually-found`).
-Agents are not yet scheduled or given a workspace to run in — that is Phases
-3 and 4.
+CLI (see `docs/architecture.md`), and isolated per-task git worktrees with
+crash-safe reuse. Nothing schedules a task onto an agent yet — that is
+Phase 4.
 
 ## Architecture
 
@@ -149,8 +148,8 @@ Real providers are never required to run the suite.
 |-------|-------------------------------------------------|--------|
 | 1 | CLI, SQLite, task model, state machine, config  | done |
 | 2 | `AgentRuntime` port, mock runtime, Claude Code adapter | done |
-| 3 | Git worktrees, workspace manager | next |
-| 4 | Scheduler, worker pool, concurrency, recovery | |
+| 3 | Git worktrees, workspace manager | done |
+| 4 | Scheduler, worker pool, concurrency, recovery | next |
 | 5 | QA, reviewer, workflows, feedback loops | |
 | 6 | Ollama, DeepSeek, OpenAI-compatible providers | |
 | 7 | GitHub, CI, pull requests, human approval | |
