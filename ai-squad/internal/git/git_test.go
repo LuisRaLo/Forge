@@ -248,3 +248,87 @@ func TestCommandErrorCarriesStderr(t *testing.T) {
 		t.Fatal("expected a non-empty error message")
 	}
 }
+
+func TestCommitStagesAndCommits(t *testing.T) {
+	t.Parallel()
+	c := New()
+	repo := newTestRepo(t)
+	ctx := context.Background()
+
+	if err := exec.Command("sh", "-c", "echo changed > "+shQuote(filepath.Join(repo, "README.md"))).Run(); err != nil {
+		t.Fatalf("modify file: %v", err)
+	}
+
+	committed, err := c.Commit(ctx, repo, "update readme")
+	if err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	if !committed {
+		t.Fatal("expected a commit to have been made")
+	}
+
+	log, err := exec.Command("git", "-C", repo, "log", "-1", "--pretty=%s").Output()
+	if err != nil {
+		t.Fatalf("git log: %v", err)
+	}
+	if got := string(log); got != "update readme\n" {
+		t.Errorf("unexpected commit message: %q", got)
+	}
+}
+
+func TestCommitNothingToCommit(t *testing.T) {
+	t.Parallel()
+	c := New()
+	repo := newTestRepo(t)
+
+	committed, err := c.Commit(context.Background(), repo, "no-op")
+	if err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	if committed {
+		t.Error("expected no commit when nothing changed")
+	}
+}
+
+func TestPushToLocalRemote(t *testing.T) {
+	t.Parallel()
+	c := New()
+	ctx := context.Background()
+
+	// A bare repo stands in for a real GitHub remote.
+	bareDir := t.TempDir()
+	if out, err := exec.Command("git", "init", "-q", "--bare", bareDir).CombinedOutput(); err != nil {
+		t.Fatalf("init bare: %v\n%s", err, out)
+	}
+
+	repo := newTestRepo(t)
+	if out, err := exec.Command("git", "-C", repo, "remote", "add", "origin", bareDir).CombinedOutput(); err != nil {
+		t.Fatalf("add remote: %v\n%s", err, out)
+	}
+
+	if err := c.Push(ctx, repo, "origin", "main"); err != nil {
+		t.Fatalf("push: %v", err)
+	}
+
+	out, err := exec.Command("git", "-C", bareDir, "branch", "--list", "main").Output()
+	if err != nil {
+		t.Fatalf("list branches: %v", err)
+	}
+	if len(out) == 0 {
+		t.Error("expected main to exist on the remote after push")
+	}
+}
+
+func TestCurrentBranch(t *testing.T) {
+	t.Parallel()
+	c := New()
+	repo := newTestRepo(t)
+
+	got, err := c.CurrentBranch(context.Background(), repo)
+	if err != nil {
+		t.Fatalf("current branch: %v", err)
+	}
+	if got != "main" {
+		t.Errorf("expected main, got %s", got)
+	}
+}

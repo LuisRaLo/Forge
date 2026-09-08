@@ -42,6 +42,12 @@ type AgentRun struct {
 	// Error is redacted before it reaches this field.
 	Error string
 
+	// PermissionDenials records policy refusals the runtime reported (see
+	// RunResult.PermissionDenials). Part of the audit trail: an agent
+	// hitting a permission wall is a security-relevant event, not something
+	// to discard once observed.
+	PermissionDenials []string
+
 	Usage      Usage
 	Duration   time.Duration
 	StartedAt  time.Time

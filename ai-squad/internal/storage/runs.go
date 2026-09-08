@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -10,7 +11,7 @@ import (
 )
 
 const runColumns = `id, task_id, step_id, agent, runtime, status, session_id,
-	stop_reason, error, model, input_tokens, output_tokens,
+	stop_reason, error, permission_denials, model, input_tokens, output_tokens,
 	cache_read_tokens, cache_creation_tokens, cost_usd, cost_estimated,
 	duration_ms, started_at, finished_at`
 
@@ -47,18 +48,24 @@ func (r *RunRepo) Record(ctx context.Context, run *core.AgentRun) (*core.AgentRu
 		saved.StartedAt = saved.FinishedAt.Add(-saved.Duration)
 	}
 
-	err := withTx(ctx, r.db.DB, func(tx *sql.Tx) error {
+	denials, err := json.Marshal(saved.PermissionDenials)
+	if err != nil {
+		return nil, fmt.Errorf("encode permission denials: %w", err)
+	}
+
+	err = withTx(ctx, r.db.DB, func(tx *sql.Tx) error {
 		res, err := tx.ExecContext(ctx, `
 			INSERT INTO agent_runs (
 				task_id, step_id, agent, runtime, status, session_id,
-				stop_reason, error, model, input_tokens, output_tokens,
-				cache_read_tokens, cache_creation_tokens, cost_usd,
-				cost_estimated, duration_ms, started_at, finished_at
-			) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+				stop_reason, error, permission_denials, model, input_tokens,
+				output_tokens, cache_read_tokens, cache_creation_tokens,
+				cost_usd, cost_estimated, duration_ms, started_at, finished_at
+			) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 			ON CONFLICT (task_id, step_id) DO UPDATE SET
 				agent = excluded.agent, runtime = excluded.runtime,
 				status = excluded.status, session_id = excluded.session_id,
 				stop_reason = excluded.stop_reason, error = excluded.error,
+				permission_denials = excluded.permission_denials,
 				model = excluded.model, input_tokens = excluded.input_tokens,
 				output_tokens = excluded.output_tokens,
 				cache_read_tokens = excluded.cache_read_tokens,
@@ -68,7 +75,7 @@ func (r *RunRepo) Record(ctx context.Context, run *core.AgentRun) (*core.AgentRu
 				duration_ms = excluded.duration_ms,
 				started_at = excluded.started_at, finished_at = excluded.finished_at`,
 			saved.TaskID, saved.StepID, saved.Agent, saved.Runtime, string(saved.Status),
-			saved.SessionID, saved.StopReason, saved.Error, saved.Usage.Model,
+			saved.SessionID, saved.StopReason, saved.Error, string(denials), saved.Usage.Model,
 			saved.Usage.InputTokens, saved.Usage.OutputTokens,
 			saved.Usage.CacheReadTokens, saved.Usage.CacheCreationTokens,
 			nullableCost(saved.Usage.CostUSD), saved.Usage.CostEstimated,
@@ -138,6 +145,7 @@ func scanRun(rows *sql.Rows) (*core.AgentRun, error) {
 	var (
 		run                   core.AgentRun
 		status                string
+		permissionDenials     string
 		costUSD               sql.NullFloat64
 		costEstimated         bool
 		durationMS            int64
@@ -145,7 +153,7 @@ func scanRun(rows *sql.Rows) (*core.AgentRun, error) {
 	)
 	if err := rows.Scan(
 		&run.ID, &run.TaskID, &run.StepID, &run.Agent, &run.Runtime, &status,
-		&run.SessionID, &run.StopReason, &run.Error, &run.Usage.Model,
+		&run.SessionID, &run.StopReason, &run.Error, &permissionDenials, &run.Usage.Model,
 		&run.Usage.InputTokens, &run.Usage.OutputTokens,
 		&run.Usage.CacheReadTokens, &run.Usage.CacheCreationTokens,
 		&costUSD, &costEstimated, &durationMS, &startedAt, &finishedAt,
@@ -153,6 +161,11 @@ func scanRun(rows *sql.Rows) (*core.AgentRun, error) {
 		return nil, err
 	}
 
+	if permissionDenials != "" {
+		if err := json.Unmarshal([]byte(permissionDenials), &run.PermissionDenials); err != nil {
+			return nil, fmt.Errorf("decode permission denials: %w", err)
+		}
+	}
 	run.Status = core.RunStatus(status)
 	run.Usage.CostEstimated = costEstimated
 	if costUSD.Valid {

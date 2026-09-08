@@ -30,6 +30,7 @@ func (s *Scheduler) claimNext(ctx context.Context) (*core.Task, bool, error) {
 			}
 			return nil, false, err
 		}
+		s.log.Info("task claimed", "task", claimed.ID, "agent", claimed.Agent, "status", claimed.Status)
 		return claimed, true, nil
 	}
 	return nil, false, nil

@@ -231,3 +231,58 @@ func TestRunCascadesWithTask(t *testing.T) {
 		t.Errorf("expected runs to cascade-delete with the task, got %d", len(list))
 	}
 }
+
+func TestRecordPersistsPermissionDenials(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	db := newTestDB(t)
+	tasks := NewTaskRepo(db, core.SystemClock)
+	runs := NewRunRepo(db)
+
+	task := seedTask(t, tasks)
+
+	saved, err := runs.Record(ctx, &core.AgentRun{
+		TaskID: task.ID, StepID: "s1", Agent: "developer", Runtime: "claude",
+		Status: core.RunSucceeded, PermissionDenials: []string{"Bash(rm -rf /)", "WebFetch"},
+	})
+	if err != nil {
+		t.Fatalf("record: %v", err)
+	}
+	if len(saved.PermissionDenials) != 2 {
+		t.Fatalf("expected 2 denials in the returned run, got %v", saved.PermissionDenials)
+	}
+
+	list, err := runs.ListByTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(list) != 1 || len(list[0].PermissionDenials) != 2 {
+		t.Fatalf("expected 2 persisted denials, got %+v", list)
+	}
+	if list[0].PermissionDenials[0] != "Bash(rm -rf /)" {
+		t.Errorf("unexpected denial content: %v", list[0].PermissionDenials)
+	}
+}
+
+func TestRecordWithoutPermissionDenials(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	db := newTestDB(t)
+	tasks := NewTaskRepo(db, core.SystemClock)
+	runs := NewRunRepo(db)
+
+	task := seedTask(t, tasks)
+	if _, err := runs.Record(ctx, &core.AgentRun{
+		TaskID: task.ID, StepID: "s1", Agent: "developer", Runtime: "claude", Status: core.RunSucceeded,
+	}); err != nil {
+		t.Fatalf("record: %v", err)
+	}
+
+	list, err := runs.ListByTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(list[0].PermissionDenials) != 0 {
+		t.Errorf("expected no denials, got %v", list[0].PermissionDenials)
+	}
+}

@@ -507,3 +507,105 @@ func TestApproveCompletesAWaitingApprovalTask(t *testing.T) {
 		t.Fatal("approving an already-completed task must be rejected")
 	}
 }
+
+func TestPRCommandsRequireAWorkspace(t *testing.T) {
+	t.Parallel()
+	cfg := newWorkspace(t)
+	mustRun(t, cfg, "init")
+	mockConfig(t, cfg)
+
+	repo := newTestRepo(t)
+	mustRun(t, cfg, "task", "create", "--title", "no workspace yet", "--repo", repo, "--agent", "developer")
+
+	for _, args := range [][]string{
+		{"pr", "create", "TASK-1"},
+		{"pr", "status", "TASK-1"},
+		{"pr", "comments", "TASK-1"},
+	} {
+		if _, err := run(t, cfg, args...); err == nil {
+			t.Errorf("%v: expected an error before the task has run", args)
+		}
+	}
+}
+
+func TestPRCommandsRejectUnknownTask(t *testing.T) {
+	t.Parallel()
+	cfg := newWorkspace(t)
+	mustRun(t, cfg, "init")
+
+	if _, err := run(t, cfg, "pr", "status", "TASK-404"); err == nil {
+		t.Fatal("expected an error for an unknown task")
+	}
+}
+
+func TestStructuredLogsWriteToFileNotStdout(t *testing.T) {
+	t.Parallel()
+	cfg := newWorkspace(t)
+	mustRun(t, cfg, "init")
+	mockConfig(t, cfg)
+
+	repo := newTestRepo(t)
+	out := mustRun(t, cfg, "task", "create", "--title", "logged", "--repo", repo, "--agent", "developer")
+	if strings.Contains(out, "level=") || strings.Contains(out, `"level"`) {
+		t.Errorf("structured log lines must not leak into command stdout, got:\n%s", out)
+	}
+
+	logPath := filepath.Join(filepath.Dir(cfg), "logs", "ai-squad.log")
+	if _, err := os.Stat(logPath); err != nil {
+		t.Fatalf("expected the log file to exist: %v", err)
+	}
+}
+
+func TestLogFormatJSONProducesJSONLines(t *testing.T) {
+	t.Parallel()
+	cfg := newWorkspace(t)
+	mustRun(t, cfg, "init")
+	mockConfig(t, cfg)
+
+	body, err := os.ReadFile(cfg)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	edited := strings.Replace(string(body), "log_format: text", "log_format: json", 1)
+	if edited == string(body) {
+		t.Fatal("test fixture did not match the shipped config's log_format line")
+	}
+	if err := os.WriteFile(cfg, []byte(edited), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	repo := newTestRepo(t)
+	mustRun(t, cfg, "task", "create", "--title", "t", "--repo", repo, "--agent", "developer")
+	mustRun(t, cfg, "worker", "start")
+
+	logPath := filepath.Join(filepath.Dir(cfg), "logs", "ai-squad.log")
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	if len(data) == 0 {
+		t.Skip("no log lines were emitted at the default log level for this run")
+	}
+	firstLine := strings.SplitN(string(data), "\n", 2)[0]
+	if !strings.HasPrefix(strings.TrimSpace(firstLine), "{") {
+		t.Errorf("expected a JSON log line with log_format: json, got %q", firstLine)
+	}
+}
+
+func TestStatusShowsCostAgainstLimit(t *testing.T) {
+	t.Parallel()
+	cfg := newWorkspace(t)
+	mustRun(t, cfg, "init")
+
+	out := mustRun(t, cfg, "status")
+	if !strings.Contains(out, "Cost (last 24h)") {
+		t.Errorf("expected cost visibility in status output, got:\n%s", out)
+	}
+
+	out = mustRun(t, cfg, "status", "--json")
+	for _, want := range []string{"cost_last_24h_usd", "max_daily_cost_usd"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected %q in JSON status, got:\n%s", want, out)
+		}
+	}
+}

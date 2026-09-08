@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/LuisRaLo/ai-squad/internal/core"
@@ -276,5 +277,39 @@ func (s *Service) resolveRepository(path string) (string, error) {
 	if !info.IsDir() {
 		return "", core.Invalid("repository", "path is not a directory: "+abs)
 	}
+	if err := rejectSensitiveRepository(abs); err != nil {
+		return "", err
+	}
 	return abs, nil
+}
+
+// rejectSensitiveRepository refuses a repository path that is the home
+// directory itself, or a conventionally sensitive directory beneath it
+// (.ssh, .aws, .kube, and similar credential stores). A task's workspace is
+// a git worktree of whatever this path points at: if it were $HOME on a
+// machine where dotfiles happen to be tracked in git, an agent would gain
+// read/write access to SSH keys, cloud credentials and Kubernetes config —
+// exactly what this project's own security rules rule out ("No permitir
+// acceso a .ssh, .aws, .kube, passwords o keychains"). This is checked once,
+// at task creation, rather than trusted to every runtime's own sandboxing.
+func rejectSensitiveRepository(abs string) error {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return nil // nothing to compare against
+	}
+	home = filepath.Clean(home)
+	abs = filepath.Clean(abs)
+
+	if abs == home {
+		return core.Invalid("repository",
+			"refusing to use the home directory itself as a task repository")
+	}
+
+	for _, sensitive := range []string{".ssh", ".aws", ".kube", ".gnupg", ".docker"} {
+		if abs == filepath.Join(home, sensitive) {
+			return core.Invalid("repository",
+				fmt.Sprintf("refusing to use %s as a task repository: it conventionally holds credentials", abs))
+		}
+	}
+	return nil
 }

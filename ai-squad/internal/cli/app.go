@@ -4,6 +4,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 
@@ -31,6 +32,8 @@ type App struct {
 	Workspaces *workspace.Manager
 	Tasks      *tasks.Service
 	Scheduler  *scheduler.Scheduler
+
+	logFile *os.File
 }
 
 // workflows adapts the configuration to the tasks.Workflows interface, so the
@@ -102,6 +105,12 @@ func open(ctx context.Context, configPath string) (*App, error) {
 		return nil, err
 	}
 
+	logger, logFile, err := newLogger(cfg)
+	if err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+
 	repo := storage.NewTaskRepo(db, core.SystemClock)
 	runRepo := storage.NewRunRepo(db)
 	artifactRepo := storage.NewArtifactRepo(db, core.SystemClock)
@@ -125,7 +134,7 @@ func open(ctx context.Context, configPath string) (*App, error) {
 	}, scheduler.Deps{
 		Tasks: repo, Runs: runRepo, Artifacts: artifactRepo,
 		Agents: registry, Runtimes: runtimeRegistry, Workspaces: workspaces,
-		Workflows: workflows{cfg: cfg}, RuntimeFor: runtimeFor,
+		Workflows: workflows{cfg: cfg}, RuntimeFor: runtimeFor, Log: logger,
 	})
 	if err != nil {
 		_ = db.Close()
@@ -135,16 +144,64 @@ func open(ctx context.Context, configPath string) (*App, error) {
 	return &App{
 		Cfg: cfg, DB: db, Repo: repo, Runs: runRepo, Artifacts: artifactRepo,
 		Agents: registry, Runtimes: runtimeRegistry, Workspaces: workspaces,
-		Tasks: svc, Scheduler: sched,
+		Tasks: svc, Scheduler: sched, logFile: logFile,
 	}, nil
 }
 
-// Close releases the database handle.
+// Close releases the database handle and log file.
 func (a *App) Close() error {
-	if a == nil || a.DB == nil {
+	if a == nil {
+		return nil
+	}
+	if a.logFile != nil {
+		_ = a.logFile.Close()
+	}
+	if a.DB == nil {
 		return nil
 	}
 	return a.DB.Close()
+}
+
+// newLogger builds the process-level structured logger from
+// system.log_level/log_format, writing to <data_dir>/logs/ai-squad.log so
+// that interactive command output (task list, status, ...) on stdout stays
+// clean and human-readable. Every field logged here is either an
+// identifier (task ID, agent name) or an error already redacted before it
+// reached this layer (see internal/runtimes/claudecode/redact.go and
+// internal/scheduler's own redactForTask) — this function does not
+// perform its own redaction, so a new log call site must not introduce one
+// that logs raw runtime output.
+func newLogger(cfg *config.Config) (*slog.Logger, *os.File, error) {
+	logDir := filepath.Join(cfg.System.DataDir, "logs")
+	if err := os.MkdirAll(logDir, 0o700); err != nil {
+		return nil, nil, fmt.Errorf("create log directory: %w", err)
+	}
+	path := filepath.Join(logDir, "ai-squad.log")
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return nil, nil, fmt.Errorf("open log file %s: %w", path, err)
+	}
+
+	var level slog.Level
+	switch cfg.System.LogLevel {
+	case "debug":
+		level = slog.LevelDebug
+	case "warn":
+		level = slog.LevelWarn
+	case "error":
+		level = slog.LevelError
+	default:
+		level = slog.LevelInfo
+	}
+
+	opts := &slog.HandlerOptions{Level: level}
+	var handler slog.Handler
+	if cfg.System.LogFormat == "json" {
+		handler = slog.NewJSONHandler(f, opts)
+	} else {
+		handler = slog.NewTextHandler(f, opts)
+	}
+	return slog.New(handler), f, nil
 }
 
 // checkBindings verifies that every agent names a runtime that exists in the

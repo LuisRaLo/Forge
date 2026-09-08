@@ -343,6 +343,80 @@ running server. Both are marked as such in their package doc comments, the
 same honesty standard the Claude Code adapter was held to when its
 structured-output support turned out to be unverifiable in Phase 2.
 
+## Phase 7: GitHub integration, kept deliberately narrow
+
+`internal/git` gained `Commit`/`Push`; `internal/github` wraps `gh pr
+create`/`checks`/`view --json comments`, with every flag verified against
+the installed CLI's own `--help` output rather than guessed. `gh` was not
+authenticated on this machine (`gh auth status`: not logged in), so — same
+honesty standard as Ollama in Phase 6 — the flag *shapes* are confirmed, an
+actual PR round-trip against real GitHub is not; tests use a scripted fake
+`gh` process (the same `TestMain` re-exec pattern used for Claude Code).
+
+**A deliberate scope decision**: the fully automatic "CI FAILED -> Developer
+-> QA -> CI" loop described in the brief is not wired into the scheduler as
+a zero-touch pipeline stage. `devops.yaml` already grants its agent shell
+access to both `git` and `gh` (Phase 1), so a Claude-Code-backed devops step
+can already drive PR/CI operations itself through its own shell tool.
+Building a SEPARATE, scheduler-native CI-polling gate (a workflow step that
+polls external CI state, potentially for many minutes, without invoking a
+model at all) is real additional machinery — async polling, `WAITING`
+transitions, its own iteration accounting — that was not exercised end to
+end without live GitHub access to validate against, so it was not built out
+speculatively. What Phase 7 does deliver: `ai-squad pr create/status/comments`,
+usable both by an operator and by any shell-capable agent, plus `ai-squad
+approve` (Phase 4's CLI wiring) as the one path to `WAITING_APPROVAL ->
+COMPLETED`. Neither this package nor `approve` can merge a PR or deploy —
+there is no method that does either, not just a policy check declining to
+call one.
+
+## Phase 8: security hardening, audit trail, cost visibility
+
+Three real gaps were found by re-reading what had already been built, not
+by speculative addition:
+
+1. **`RunResult.PermissionDenials` was captured but discarded.** The Claude
+   Code adapter parsed it from the CLI's own JSON since Phase 2
+   (`permission_denials` in the probed `result` line), the scheduler never
+   persisted it. Migration `0004` adds the column; `recordRun` now populates
+   it and logs a warning when non-empty, so a runtime refusing an action is
+   a visible, queryable event (`ai-squad logs`) instead of silently lost.
+2. **`system.log_level`/`system.log_format` were validated but never
+   consumed.** Every command opened without ever constructing a logger from
+   them — the scheduler defaulted to `slog.Default()`, and the config
+   fields did nothing. `internal/cli.newLogger` now builds the real
+   `*slog.Logger` (text or JSON, at the configured level) writing to
+   `<data_dir>/logs/ai-squad.log`, kept off stdout so interactive command
+   output stays clean and scriptable.
+3. **No guard against a task repository pointing at `$HOME` or a
+   credential directory.** A task's workspace is a git worktree of whatever
+   `--repo` names; if that were `$HOME` on a machine where dotfiles are
+   tracked in git, an agent would gain read/write access to `.ssh`, `.aws`,
+   `.kube` and similar. `tasks.Service.resolveRepository` now rejects the
+   home directory itself and its conventional credential subdirectories at
+   task-creation time — checked once, centrally, rather than trusted to
+   every runtime's own sandboxing.
+
+**What was already in place from earlier phases**, listed here because
+"security hardening" is a phase heading, not a first appearance: secrets
+only via environment variables, never SQLite or YAML (Phase 1, enforced at
+config load); the Claude Code adapter's `redact()` and filtered child
+environment (Phase 2); per-task workspace isolation via git worktrees
+(Phase 3); mandatory timeouts and full `context.Context` cancellation
+throughout (Phases 2, 4, 6); the daily cost limit gate in the scheduler's
+claim loop (Phase 4); path-escape protection and shell allowlisting in the
+model-driven tool set (Phase 6); production deployment requiring
+`ai-squad approve` and nothing in this codebase capable of merging a PR or
+deploying on its own (Phase 7).
+
+`ai-squad status` now surfaces cost against the daily limit directly,
+including a count of runs whose cost could not be determined — the literal
+requirement being "si no podemos conocer el coste real de un provider,
+registra al menos el usage disponible y deja claro que el límite de coste
+es estimado": the total shown is a floor, not an exact figure, and the
+unknown-run count is what makes that visible rather than asserted in a
+comment only.
+
 ## Deferred deliberately
 
 - **Worktree management** (Phase 3). One workspace per task, never shared.

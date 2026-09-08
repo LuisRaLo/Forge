@@ -121,9 +121,13 @@ func (s *Scheduler) recordRun(
 		run.SessionID = result.SessionID
 		run.StopReason = result.StopReason
 		run.Usage = result.Usage
+		run.PermissionDenials = result.PermissionDenials
 	}
 	if _, err := s.deps.Runs.Record(ctx, run); err != nil {
 		s.log.Error("record agent run", "task", t.ID, "error", err)
+	}
+	if len(run.PermissionDenials) > 0 {
+		s.log.Warn("agent hit a permission denial", "task", t.ID, "agent", def.Name, "denials", run.PermissionDenials)
 	}
 }
 
@@ -270,6 +274,7 @@ func (s *Scheduler) advance(ctx context.Context, t *core.Task, def *core.AgentDe
 			s.log.Error("complete task", "task", t.ID, "error", err)
 			return
 		}
+		s.log.Info("task completed", "task", t.ID, "agent", def.Name)
 		if err := s.deps.Workspaces.Release(ctx, ws, workspace.ReleaseOptions{Cleanup: true}); err != nil {
 			s.log.Error("release workspace on completion", "task", t.ID, "error", err)
 		}
@@ -300,7 +305,9 @@ func (s *Scheduler) advance(ctx context.Context, t *core.Task, def *core.AgentDe
 		})
 	if err != nil {
 		s.log.Error("advance task", "task", t.ID, "error", err)
+		return
 	}
+	s.log.Info("task advanced", "task", t.ID, "from_agent", def.Name, "to_agent", nextAgent)
 }
 
 // rewind sends a task back on a failed gate, bounded by MaxStepIterations so

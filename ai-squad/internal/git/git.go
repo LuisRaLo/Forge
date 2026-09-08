@@ -171,3 +171,32 @@ func parseWorktreeList(out string) []WorktreeEntry {
 	flush()
 	return entries
 }
+sabe
+// Commit stages every change in dir and commits it. An empty diff (nothing
+// to commit) is not an error: it is reported via the bool return so callers
+// can treat "nothing changed" as success rather than parsing git's message.
+func (c *Client) Commit(ctx context.Context, dir, message string) (committed bool, err error) {
+	if _, err := c.run(ctx, dir, "add", "-A"); err != nil {
+		return false, fmt.Errorf("stage changes: %w", err)
+	}
+	if _, err := c.run(ctx, dir, "diff", "--cached", "--quiet"); err == nil {
+		return false, nil // nothing staged
+	}
+	if _, err := c.run(ctx, dir, "commit", "-m", message); err != nil {
+		return false, fmt.Errorf("commit: %w", err)
+	}
+	return true, nil
+}
+
+// Push pushes branch to remote, creating the upstream tracking ref if it
+// does not exist yet (-u), which is what lets `gh pr create` find the
+// branch immediately afterward without an extra round trip.
+func (c *Client) Push(ctx context.Context, dir, remote, branch string) error {
+	_, err := c.run(ctx, dir, "push", "-u", remote, branch)
+	return err
+}
+
+// CurrentBranch returns the branch checked out at dir.
+func (c *Client) CurrentBranch(ctx context.Context, dir string) (string, error) {
+	return c.run(ctx, dir, "rev-parse", "--abbrev-ref", "HEAD")
+}

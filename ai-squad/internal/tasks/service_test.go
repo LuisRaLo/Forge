@@ -3,6 +3,7 @@ package tasks
 import (
 	"context"
 	"errors"
+	"os"
 	"testing"
 
 	"github.com/LuisRaLo/ai-squad/internal/agents"
@@ -399,5 +400,60 @@ func TestResolveRepositoryRejectsMissingPath(t *testing.T) {
 	}
 	if task.Repository == "" {
 		t.Error("repository path should be recorded")
+	}
+}
+
+func TestCreateRejectsHomeDirectoryAsRepository(t *testing.T) {
+	t.Parallel()
+
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		t.Skip("no home directory available in this environment")
+	}
+
+	db, err := storage.OpenMemory(context.Background())
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+	if err := storage.Migrate(context.Background(), db); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	// Repository checking ON: the guard must fire even without a real
+	// git repository being required first.
+	svc, err := NewService(storage.NewTaskRepo(db, core.SystemClock), nil,
+		fakeWorkflows{"bugfix": {"dev"}}, Options{})
+	if err != nil {
+		t.Fatalf("service: %v", err)
+	}
+
+	_, err = svc.Create(context.Background(), CreateParams{
+		Title: "t", Workflow: "bugfix", Repository: home,
+	})
+	if !errors.Is(err, core.ErrValidation) {
+		t.Fatalf("expected the home directory to be rejected, got %v", err)
+	}
+}
+
+func TestRejectSensitiveRepositoryDirectly(t *testing.T) {
+	t.Parallel()
+
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		t.Skip("no home directory available in this environment")
+	}
+
+	if err := rejectSensitiveRepository(home); !errors.Is(err, core.ErrValidation) {
+		t.Errorf("expected home directory rejected, got %v", err)
+	}
+	for _, dir := range []string{".ssh", ".aws", ".kube"} {
+		path := home + "/" + dir
+		if err := rejectSensitiveRepository(path); !errors.Is(err, core.ErrValidation) {
+			t.Errorf("expected %s rejected, got %v", dir, err)
+		}
+	}
+	if err := rejectSensitiveRepository(home + "/Projects/my-api"); err != nil {
+		t.Errorf("an ordinary project directory must not be rejected: %v", err)
 	}
 }
