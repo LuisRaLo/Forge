@@ -127,6 +127,22 @@ func (s *Scheduler) recordRun(
 	}
 }
 
+// requeue moves an executing task (RUNNING or PLANNING) back to READY,
+// applying mut. PLANNING -> READY is a direct edge; RUNNING has no direct
+// edge to READY in the state machine (see docs/architecture.md), so it is
+// routed through WAITING, which both RUNNING and READY border. mut is
+// applied on the first transition so it lands exactly once regardless of
+// which path is taken.
+func (s *Scheduler) requeue(ctx context.Context, t *core.Task, reason string, mut func(*core.Task)) (*core.Task, error) {
+	if t.Status == core.StatusRunning {
+		if _, err := s.deps.Tasks.Transition(ctx, t.ID, core.StatusWaiting, reason, mut); err != nil {
+			return nil, err
+		}
+		return s.deps.Tasks.Transition(ctx, t.ID, core.StatusReady, reason, nil)
+	}
+	return s.deps.Tasks.Transition(ctx, t.ID, core.StatusReady, reason, mut)
+}
+
 // handleRunError decides what a failed execution means for the task: a
 // retryable error within budget goes back to READY (after honouring the
 // agent's backoff), otherwise the task is failed for manual attention.
@@ -146,7 +162,7 @@ func (s *Scheduler) handleRunError(ctx context.Context, t *core.Task, def *core.
 			case <-ctx.Done():
 			}
 		}
-		_, err := s.deps.Tasks.Transition(ctx, t.ID, core.StatusReady,
+		_, err := s.requeue(ctx, t,
 			fmt.Sprintf("retrying after error: %s", redactForTask(runErr.Error())), func(task *core.Task) {
 				task.Attempts = attempts
 				task.LastError = redactForTask(runErr.Error())
@@ -262,16 +278,16 @@ func (s *Scheduler) advance(ctx context.Context, t *core.Task, def *core.AgentDe
 
 	nextStep := t.Step + 1
 	nextAgent := steps[nextStep]
-	nextStatus := core.StatusReady
-	if isGated(s.deps.Agents, nextAgent) {
-		// Purely a naming/status distinction (see docs/architecture.md):
-		// queuing directly ahead of a gate step reads as "under review."
-		nextStatus = core.StatusReview
-	}
 
-	from := t.Status
-	if from == core.StatusPlanning {
-		nextStatus = core.StatusReady // PLANNING's allowed targets do not include REVIEW
+	// The state machine has no RUNNING -> READY edge (see
+	// docs/architecture.md): a RUNNING step always advances into REVIEW,
+	// which is what the next step's claim (REVIEW -> RUNNING) picks up —
+	// for any next step, not only a gated one. PLANNING is the one
+	// execution state that DOES have a direct edge to READY, used only for
+	// a multi-step workflow's very first step.
+	nextStatus := core.StatusReview
+	if t.Status == core.StatusPlanning {
+		nextStatus = core.StatusReady
 	}
 
 	_, err = s.deps.Tasks.Transition(ctx, t.ID, nextStatus,
@@ -317,7 +333,7 @@ func (s *Scheduler) rewind(ctx context.Context, t *core.Task, def *core.AgentDef
 	}
 	targetAgent := steps[targetStep]
 
-	_, err = s.deps.Tasks.Transition(ctx, t.ID, core.StatusReady,
+	_, err = s.requeue(ctx, t,
 		fmt.Sprintf("gate %s failed, sending back to %s: %s", def.Name, targetAgent, verdict.Summary),
 		func(task *core.Task) {
 			if task.Metadata == nil {
@@ -345,15 +361,6 @@ func (s *Scheduler) stepInfo(t *core.Task) (steps []string, last bool, err error
 		return nil, false, fmt.Errorf("resolve workflow %s: %w", t.Workflow, err)
 	}
 	return steps, t.Step >= len(steps)-1, nil
-}
-
-// isGated reports whether name's agent definition has an enabled gate.
-// Errors resolving the agent are treated as "not gated" — a downstream
-// Transition will surface the real problem with a clearer error than this
-// helper could.
-func isGated(agents core.AgentRegistry, name string) bool {
-	def, err := agents.Get(name)
-	return err == nil && def.Gate.Enabled
 }
 
 func parseGateVerdict(structured json.RawMessage) (*gateVerdict, error) {

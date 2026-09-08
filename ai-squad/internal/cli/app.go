@@ -12,6 +12,7 @@ import (
 	"github.com/santillana/ai-squad/internal/core"
 	"github.com/santillana/ai-squad/internal/git"
 	"github.com/santillana/ai-squad/internal/runtimes"
+	"github.com/santillana/ai-squad/internal/scheduler"
 	"github.com/santillana/ai-squad/internal/storage"
 	"github.com/santillana/ai-squad/internal/tasks"
 	"github.com/santillana/ai-squad/internal/workspace"
@@ -23,10 +24,13 @@ type App struct {
 	Cfg        *config.Config
 	DB         *storage.DB
 	Repo       core.TaskRepository
+	Runs       core.RunRepository
+	Artifacts  core.ArtifactRepository
 	Agents     *agents.Registry
 	Runtimes   *runtimes.Registry
 	Workspaces *workspace.Manager
 	Tasks      *tasks.Service
+	Scheduler  *scheduler.Scheduler
 }
 
 // workflows adapts the configuration to the tasks.Workflows interface, so the
@@ -99,6 +103,9 @@ func open(ctx context.Context, configPath string) (*App, error) {
 	}
 
 	repo := storage.NewTaskRepo(db, core.SystemClock)
+	runRepo := storage.NewRunRepo(db)
+	artifactRepo := storage.NewArtifactRepo(db, core.SystemClock)
+
 	svc, err := tasks.NewService(repo, registry, workflows{cfg: cfg}, tasks.Options{
 		DefaultMaxAttempts: cfg.Limits.MaxTaskAttempts,
 	})
@@ -107,9 +114,28 @@ func open(ctx context.Context, configPath string) (*App, error) {
 		return nil, err
 	}
 
+	sched, err := scheduler.New(scheduler.Config{
+		MaxConcurrency:    cfg.Scheduler.MaxConcurrency,
+		PollInterval:      cfg.Scheduler.PollInterval.Duration(),
+		ReapGrace:         cfg.Scheduler.LeaseDuration.Duration(),
+		MaxTaskAttempts:   cfg.Limits.MaxTaskAttempts,
+		MaxTaskDuration:   cfg.Limits.MaxTaskDuration.Duration(),
+		MaxStepIterations: cfg.Limits.MaxStepIterations,
+		MaxDailyCostUSD:   cfg.Limits.MaxDailyCostUSD,
+	}, scheduler.Deps{
+		Tasks: repo, Runs: runRepo, Artifacts: artifactRepo,
+		Agents: registry, Runtimes: runtimeRegistry, Workspaces: workspaces,
+		Workflows: workflows{cfg: cfg}, RuntimeFor: runtimeFor,
+	})
+	if err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+
 	return &App{
-		Cfg: cfg, DB: db, Repo: repo, Agents: registry, Runtimes: runtimeRegistry,
-		Workspaces: workspaces, Tasks: svc,
+		Cfg: cfg, DB: db, Repo: repo, Runs: runRepo, Artifacts: artifactRepo,
+		Agents: registry, Runtimes: runtimeRegistry, Workspaces: workspaces,
+		Tasks: svc, Scheduler: sched,
 	}, nil
 }
 

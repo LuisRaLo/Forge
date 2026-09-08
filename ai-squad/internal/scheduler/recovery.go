@@ -68,15 +68,22 @@ func (s *Scheduler) reapStale(ctx context.Context) error {
 // exhausted. Failures reclaiming one task are logged, not returned, so one
 // bad row cannot stop the sweep from reaching the rest.
 func (s *Scheduler) reclaim(ctx context.Context, t *core.Task, reason string) {
+	mut := func(task *core.Task) {
+		task.Attempts++
+		task.LastError = reason
+	}
+
+	var err error
 	target := core.StatusReady
 	if t.AttemptsExhausted() {
 		target = core.StatusBlocked
+		// BLOCKED is a direct edge from both RUNNING and PLANNING; no hop
+		// needed.
+		_, err = s.deps.Tasks.Transition(ctx, t.ID, target, reason, mut)
+	} else {
+		// requeue takes care of RUNNING's missing direct edge to READY.
+		_, err = s.requeue(ctx, t, reason, mut)
 	}
-
-	_, err := s.deps.Tasks.Transition(ctx, t.ID, target, reason, func(task *core.Task) {
-		task.Attempts++
-		task.LastError = reason
-	})
 	if err != nil {
 		s.log.Error("failed to reclaim task", "task", t.ID, "error", err)
 		return

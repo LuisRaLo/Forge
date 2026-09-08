@@ -12,7 +12,10 @@ import (
 // returning ok=false when there is nothing to run right now.
 func (s *Scheduler) claimNext(ctx context.Context) (*core.Task, bool, error) {
 	candidates, err := s.deps.Tasks.List(ctx, core.TaskFilter{
-		Statuses: []core.TaskStatus{core.StatusPending, core.StatusReady},
+		// READY is fed by PENDING/PLANNING/WAITING/retry; REVIEW is fed by
+		// RUNNING (the state machine has no direct RUNNING -> READY edge —
+		// see docs/architecture.md). Both are "queued, claimable" states.
+		Statuses: []core.TaskStatus{core.StatusPending, core.StatusReady, core.StatusReview},
 		Limit:    16, // more than one worker slot's worth, so losing a race still leaves options this tick
 	})
 	if err != nil {
@@ -52,6 +55,7 @@ func (s *Scheduler) claim(ctx context.Context, t *core.Task) (*core.Task, error)
 		}
 		t = queued
 	}
+	// READY -> RUNNING and REVIEW -> RUNNING are both legal claims.
 	return s.deps.Tasks.Transition(ctx, t.ID, core.StatusRunning, "claimed by worker", nil)
 }
 

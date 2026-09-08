@@ -1,6 +1,7 @@
 package core
 
 import (
+	"slices"
 	"strings"
 	"time"
 )
@@ -42,12 +43,7 @@ func (p ShellPolicy) Allows(command string) bool {
 	if len(p.Commands) == 0 {
 		return true
 	}
-	for _, c := range p.Commands {
-		if c == command {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(p.Commands, command)
 }
 
 // Permissions is the effective policy for an agent. The zero value denies

@@ -142,6 +142,41 @@ func (s *Scheduler) Run(ctx context.Context) error {
 	}
 }
 
+// RunOnce drains the currently claimable queue and returns, rather than
+// looping forever. It is what backs `ai-squad worker start`, for a single
+// supervised pass (e.g. from cron), as distinct from `ai-squad daemon`,
+// which never returns until stopped.
+func (s *Scheduler) RunOnce(ctx context.Context) error {
+	if err := s.recoverInterrupted(ctx); err != nil {
+		return fmt.Errorf("recovery sweep: %w", err)
+	}
+	// A safety valve, not an expected outcome: legitimate progress always
+	// terminates via attempt limits reaching FAILED/BLOCKED/COMPLETED. This
+	// guards a single supervised pass against hanging forever if it ever
+	// doesn't.
+	const maxPasses = 10_000
+	for i := 0; i < maxPasses; i++ {
+		if !s.hasClaimableWork(ctx) {
+			return nil
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		s.tick(ctx)
+		s.wg.Wait()
+	}
+	return fmt.Errorf("worker: exceeded %d passes without draining the queue; a task may be stuck", maxPasses)
+}
+
+// hasClaimableWork reports whether any PENDING/READY/REVIEW task remains.
+func (s *Scheduler) hasClaimableWork(ctx context.Context) bool {
+	tasks, err := s.deps.Tasks.List(ctx, core.TaskFilter{
+		Statuses: []core.TaskStatus{core.StatusPending, core.StatusReady, core.StatusReview},
+		Limit:    1,
+	})
+	return err == nil && len(tasks) > 0
+}
+
 // tick reaps stale leases, then claims and dispatches as many tasks as there
 // are free worker slots.
 func (s *Scheduler) tick(ctx context.Context) {
@@ -172,9 +207,7 @@ func (s *Scheduler) tick(ctx context.Context) {
 			return // nothing runnable
 		}
 
-		s.wg.Add(1)
-		go func() {
-			defer s.wg.Done()
+		s.wg.Go(func() {
 			defer func() { <-s.sem }()
 			defer func() {
 				// A panicking step must not take a worker slot down with it
@@ -185,7 +218,7 @@ func (s *Scheduler) tick(ctx context.Context) {
 				}
 			}()
 			s.execute(ctx, task)
-		}()
+		})
 	}
 }
 
