@@ -15,7 +15,7 @@ func TestBuildConstructsMockRuntime(t *testing.T) {
 
 	reg, err := Build(map[string]config.RuntimeConfig{
 		"m": {Type: config.RuntimeTypeMock},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
@@ -36,18 +36,69 @@ func TestBuildRejectsMissingClaudeExecutable(t *testing.T) {
 
 	_, err := Build(map[string]config.RuntimeConfig{
 		"claude": {Type: config.RuntimeTypeClaudeCode, Command: "definitely-not-a-real-binary-xyz"},
-	})
+	}, nil)
 	if err == nil {
 		t.Fatal("expected an error for a missing executable")
 	}
 }
 
-func TestBuildRejectsModelRuntimeForNow(t *testing.T) {
+func TestBuildRejectsModelRuntimeWithUnknownProvider(t *testing.T) {
 	t.Parallel()
 
 	_, err := Build(map[string]config.RuntimeConfig{
 		"local": {Type: config.RuntimeTypeModel, Provider: "ollama"},
-	})
+	}, nil)
+	if !errors.Is(err, core.ErrValidation) {
+		t.Fatalf("expected ErrValidation, got %v", err)
+	}
+}
+
+func TestBuildConstructsModelRuntimeOverOpenAICompatibleProvider(t *testing.T) {
+	t.Parallel()
+
+	reg, err := Build(
+		map[string]config.RuntimeConfig{"cloud": {Type: config.RuntimeTypeModel, Provider: "deepseek"}},
+		map[string]config.ProviderConfig{"deepseek": {
+			Type: config.ProviderTypeOpenAICompatible, BaseURL: "https://api.deepseek.com/v1",
+			Model: "deepseek-chat", APIKeyEnv: "DEEPSEEK_API_KEY",
+		}},
+	)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	rt, err := reg.Runtime("cloud")
+	if err != nil {
+		t.Fatalf("runtime: %v", err)
+	}
+	if !rt.Capabilities().Has(core.CapabilityTools) {
+		t.Error("a model runtime should declare tool support")
+	}
+}
+
+func TestBuildConstructsModelRuntimeOverOllamaProvider(t *testing.T) {
+	t.Parallel()
+
+	reg, err := Build(
+		map[string]config.RuntimeConfig{"local": {Type: config.RuntimeTypeModel, Provider: "ollama"}},
+		map[string]config.ProviderConfig{"ollama": {
+			Type: config.ProviderTypeOllama, BaseURL: "http://localhost:11434", Model: "qwen2.5-coder",
+		}},
+	)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if _, err := reg.Runtime("local"); err != nil {
+		t.Fatalf("runtime: %v", err)
+	}
+}
+
+func TestBuildRejectsModelRuntimeOverMockProvider(t *testing.T) {
+	t.Parallel()
+
+	_, err := Build(
+		map[string]config.RuntimeConfig{"m": {Type: config.RuntimeTypeModel, Provider: "p"}},
+		map[string]config.ProviderConfig{"p": {Type: config.ProviderTypeMock}},
+	)
 	if !errors.Is(err, core.ErrValidation) {
 		t.Fatalf("expected ErrValidation, got %v", err)
 	}
@@ -56,7 +107,7 @@ func TestBuildRejectsModelRuntimeForNow(t *testing.T) {
 func TestBuildRejectsUnknownType(t *testing.T) {
 	t.Parallel()
 
-	_, err := Build(map[string]config.RuntimeConfig{"x": {Type: "telepathy"}})
+	_, err := Build(map[string]config.RuntimeConfig{"x": {Type: "telepathy"}}, nil)
 	if !errors.Is(err, core.ErrValidation) {
 		t.Fatalf("expected ErrValidation, got %v", err)
 	}
@@ -65,7 +116,7 @@ func TestBuildRejectsUnknownType(t *testing.T) {
 func TestRuntimeUnknownNameListsKnownOnes(t *testing.T) {
 	t.Parallel()
 
-	reg, err := Build(map[string]config.RuntimeConfig{"m": {Type: config.RuntimeTypeMock}})
+	reg, err := Build(map[string]config.RuntimeConfig{"m": {Type: config.RuntimeTypeMock}}, nil)
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
@@ -77,7 +128,7 @@ func TestRuntimeUnknownNameListsKnownOnes(t *testing.T) {
 func TestNegotiateAcceptsCompatibleBinding(t *testing.T) {
 	t.Parallel()
 
-	reg, err := Build(map[string]config.RuntimeConfig{"m": {Type: config.RuntimeTypeMock}})
+	reg, err := Build(map[string]config.RuntimeConfig{"m": {Type: config.RuntimeTypeMock}}, nil)
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
@@ -130,7 +181,7 @@ func TestNegotiateRejectsIncompatibleBinding(t *testing.T) {
 func TestNegotiateRejectsUnknownRuntimeBinding(t *testing.T) {
 	t.Parallel()
 
-	reg, err := Build(map[string]config.RuntimeConfig{"m": {Type: config.RuntimeTypeMock}})
+	reg, err := Build(map[string]config.RuntimeConfig{"m": {Type: config.RuntimeTypeMock}}, nil)
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}

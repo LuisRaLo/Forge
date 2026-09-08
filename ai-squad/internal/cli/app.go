@@ -77,7 +77,7 @@ func open(ctx context.Context, configPath string) (*App, error) {
 		return nil, err
 	}
 
-	runtimeRegistry, err := runtimes.Build(cfg.Runtimes)
+	runtimeRegistry, err := runtimes.Build(cfg.Runtimes, cfg.Providers)
 	if err != nil {
 		_ = db.Close()
 		return nil, err

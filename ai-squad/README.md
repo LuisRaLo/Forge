@@ -9,7 +9,7 @@ several, reached through an adapter; nothing in the core imports it.
 
 ## Status
 
-**Phase 5 of 8 is complete.** The full local pipeline runs:
+**Phase 6 of 8 is complete.** The full local pipeline runs:
 `ai-squad task create --workflow feature` queues a task, `ai-squad worker
 start` (single pass) or `ai-squad daemon` (continuous) claims it, executes
 each workflow step under a bounded worker pool, evaluates QA's pass/fail
@@ -166,6 +166,6 @@ Real providers are never required to run the suite.
 | 3 | Git worktrees, workspace manager | done |
 | 4 | Scheduler, worker pool, concurrency, recovery | done |
 | 5 | QA, reviewer, workflows, feedback loops | done |
-| 6 | Ollama, DeepSeek, OpenAI-compatible providers | |
+| 6 | Ollama, DeepSeek, OpenAI-compatible providers | done |
 | 7 | GitHub, CI, pull requests, human approval | |
 | 8 | Security hardening, audit logs, cost controls | |

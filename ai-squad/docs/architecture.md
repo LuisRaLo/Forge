@@ -302,6 +302,47 @@ one, which only protects one task's own `Acquire`/`Release` against being
 invoked twice). Two different repositories are unaffected and still proceed
 in parallel. Confirmed by re-running the full suite repeatedly afterward.
 
+## Phase 6: model-driven runtimes
+
+`internal/runtimes/model.Runtime` is the counterpart to
+`internal/runtimes/claudecode.Runtime`: it drives a tool-call loop
+in-process on top of a plain `core.LLMProvider`, which is what Ollama,
+DeepSeek and any OpenAI-compatible endpoint need, since none of them own an
+agent loop of their own (see the architecture split at the top of this
+document). The loop itself lives in `internal/runtimes/model`; the tools it
+offers live in `internal/tools` (`read_file`, `write_file`, `run_shell`),
+gated by `core.Permissions` exactly like the Claude Code adapter's tool
+allow/disallow mapping — a denied capability simply is not offered, rather
+than being offered and refused at call time. `internal/tools` is injected
+into `model.Runtime` as a `ToolBuilder` function rather than imported and
+called from a package-level variable, keeping the runtime testable with a
+fake tool set and avoiding the kind of mutable global state this project's
+own principles rule out.
+
+Two providers exist behind the same `core.LLMProvider` port:
+
+- `internal/providers/openaicompat` speaks the OpenAI chat-completions
+  contract (`POST /chat/completions`), which is what `type:
+  openai-compatible` resolves to in configuration — this is also what
+  DeepSeek uses, since its API is an OpenAI-compatible superset.
+- `internal/providers/ollama` speaks Ollama's own contract (`POST
+  /api/chat`), distinct enough from the OpenAI shape to need its own
+  provider rather than reusing openaicompat.
+
+**Verification status, stated plainly**: `openaicompat` was tested against
+an `httptest` server standing in for the real API, which is sufficient to
+prove the request/response mapping and error classification are correct
+against the documented contract. Neither DeepSeek nor a real
+OpenAI-compatible endpoint was exercised live in this session — no
+`DEEPSEEK_API_KEY` was available. `ollama` was built and tested the same
+way; Ollama itself is not installed on this machine (`which ollama` found
+nothing, checked directly in Phase 1's environment inspection), so unlike
+the Claude Code adapter, its wire format is implemented against Ollama's
+published API documentation and not independently confirmed against a
+running server. Both are marked as such in their package doc comments, the
+same honesty standard the Claude Code adapter was held to when its
+structured-output support turned out to be unverifiable in Phase 2.
+
 ## Deferred deliberately
 
 - **Worktree management** (Phase 3). One workspace per task, never shared.
