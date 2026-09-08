@@ -286,3 +286,43 @@ func TestRecordWithoutPermissionDenials(t *testing.T) {
 		t.Errorf("expected no denials, got %v", list[0].PermissionDenials)
 	}
 }
+
+func TestRecordPersistsTranscript(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	db := newTestDB(t)
+	tasks := NewTaskRepo(db, core.SystemClock)
+	runs := NewRunRepo(db)
+
+	task := seedTask(t, tasks)
+	when := core.SystemClock().UTC().Truncate(time.Second)
+
+	saved, err := runs.Record(ctx, &core.AgentRun{
+		TaskID: task.ID, StepID: "s1", Agent: "developer", Runtime: "claude",
+		Status: core.RunSucceeded,
+		Transcript: []core.TranscriptEntry{
+			{Type: core.EventTypeAssistantText, Text: "reading the spec", Timestamp: when},
+			{Type: core.EventTypeToolUse, Text: "Write(src/main.go)", Timestamp: when},
+		},
+	})
+	if err != nil {
+		t.Fatalf("record: %v", err)
+	}
+	if len(saved.Transcript) != 2 {
+		t.Fatalf("expected 2 transcript entries in the returned run, got %v", saved.Transcript)
+	}
+
+	list, err := runs.ListByTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(list) != 1 || len(list[0].Transcript) != 2 {
+		t.Fatalf("expected 2 persisted transcript entries, got %+v", list)
+	}
+	if list[0].Transcript[0].Text != "reading the spec" {
+		t.Errorf("unexpected transcript content: %+v", list[0].Transcript)
+	}
+	if list[0].Transcript[1].Type != core.EventTypeToolUse {
+		t.Errorf("unexpected transcript type: %+v", list[0].Transcript[1])
+	}
+}

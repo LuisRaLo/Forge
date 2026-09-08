@@ -101,6 +101,8 @@
   .timeline { font-family: var(--mono); font-size: 12px; line-height: 1.7; }
   .timeline .row { display: flex; gap: 10px; }
   .timeline .t { color: var(--text-dim); flex-shrink: 0; }
+  .timeline .row.agent { padding-left: 20px; color: var(--text-dim); }
+  .timeline .row.agent .kind { color: var(--accent); margin-right: 6px; }
   .empty { color: var(--text-dim); font-size: 13px; padding: 20px 0; }
 </style>
 </head>
@@ -332,11 +334,25 @@ async function openDetail(id) {
     const errSuffix = r.error ? ` error=${r.error}` : "";
     const runLine = `run agent=${r.agent} status=${r.status} duration=${fmtDuration(r.duration)}${cost}${errSuffix}`;
     lines.push({at: r.finished_at, text: escapeHtml(runLine), textPlain: runLine});
+
+    // The agent's actual step-by-step activity for this run — assistant
+    // text, tool calls, tool results — not just the outcome above. This is
+    // the answer to "it says succeeded/failed, but what did it actually
+    // do?" without having to go dig through the runtime's own session
+    // files by hand.
+    for (const ev of (r.transcript || [])) {
+      const evText = ev.text ? `${ev.type}: ${ev.text}` : ev.type;
+      lines.push({
+        at: ev.timestamp, agent: true,
+        text: `<span class="kind">${escapeHtml(ev.type)}</span>${ev.text ? escapeHtml(ev.text) : ""}`,
+        textPlain: `  ${evText}`,
+      });
+    }
   }
   lines.sort((a, b) => (a.at || "").localeCompare(b.at || ""));
 
   document.getElementById("detail-timeline").innerHTML = lines.map(l =>
-    `<div class="row"><span class="t">${fmtTime(l.at)}</span><span>${l.text}</span></div>`
+    `<div class="row${l.agent ? " agent" : ""}"><span class="t">${fmtTime(l.at)}</span><span>${l.text}</span></div>`
   ).join("") || `<div class="muted">No history yet.</div>`;
 
   // Plain text, built separately from the HTML-escaped display lines above,

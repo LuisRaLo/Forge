@@ -24,6 +24,15 @@ func (s RunStatus) Valid() bool {
 	return false
 }
 
+// TranscriptEntry is one streamed event captured during a run — an assistant
+// message, a tool call, a tool result, and so on. This is what actually
+// happened, as opposed to AgentRun's fields, which are only the outcome.
+type TranscriptEntry struct {
+	Type      EventType `json:"type"`
+	Text      string    `json:"text,omitempty"`
+	Timestamp time.Time `json:"timestamp"`
+}
+
 // AgentRun records one execution of one agent step, including what it cost.
 type AgentRun struct {
 	ID     int64  `json:"id"`
@@ -52,6 +61,13 @@ type AgentRun struct {
 	Duration   time.Duration `json:"duration"`
 	StartedAt  time.Time     `json:"started_at"`
 	FinishedAt time.Time     `json:"finished_at"`
+
+	// Transcript is the step-by-step record of what the agent actually did:
+	// assistant text, tool calls, tool results, in order. See
+	// docs/architecture.md — this is the honest answer to "it says it
+	// succeeded, what did it actually do?" instead of making an operator go
+	// dig through the runtime's own session files by hand.
+	Transcript []TranscriptEntry `json:"transcript,omitempty"`
 }
 
 // StepID builds the canonical step identifier for a task attempt.

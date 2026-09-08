@@ -45,13 +45,20 @@ type Workspaces interface {
 	Release(ctx context.Context, ws *workspace.Workspace, opts workspace.ReleaseOptions) error
 }
 
-// GitStatus is the subset of git operations the scheduler needs to verify
-// that a step which reports success actually changed something — see
-// advance()'s use of it. Optional: a nil Deps.Git skips that verification
-// entirely (e.g. for a runtime/agent shape where it wouldn't make sense).
+// GitStatus is the subset of git operations the scheduler needs to (a)
+// verify that a step which reports success actually changed something, (b)
+// push a branch upstream once a gate step (e.g. QA running the test suite)
+// has verified it, and (c) record the task's spec file into the workspace's
+// history — see advance()'s and execute()'s use of it. Optional: a nil
+// Deps.Git skips all of this entirely (e.g. for a runtime/agent shape where
+// it wouldn't make sense).
 type GitStatus interface {
 	IsDirty(ctx context.Context, dir string) (bool, error)
 	CommitsSince(ctx context.Context, dir, baseCommit string) (int, error)
+	RemoteExists(ctx context.Context, dir, remote string) (bool, error)
+	Push(ctx context.Context, dir, remote, branch string) error
+	Commit(ctx context.Context, dir, message string) (bool, error)
+	HeadCommit(ctx context.Context, dir string) (string, error)
 }
 
 // Config bounds scheduler behaviour.

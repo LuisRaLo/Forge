@@ -197,6 +197,22 @@ func (c *Client) Push(ctx context.Context, dir, remote, branch string) error {
 	return err
 }
 
+// RemoteExists reports whether dir has a remote named remote configured.
+// Callers use this to skip a push cleanly on a repository that was never
+// given one (e.g. a scaffolded local-only project) instead of treating that
+// as an error.
+func (c *Client) RemoteExists(ctx context.Context, dir, remote string) (bool, error) {
+	_, err := c.run(ctx, dir, "remote", "get-url", remote)
+	if err == nil {
+		return true, nil
+	}
+	var ce *CommandError
+	if errors.As(err, &ce) {
+		return false, nil
+	}
+	return false, err
+}
+
 // CurrentBranch returns the branch checked out at dir.
 func (c *Client) CurrentBranch(ctx context.Context, dir string) (string, error) {
 	return c.run(ctx, dir, "rev-parse", "--abbrev-ref", "HEAD")

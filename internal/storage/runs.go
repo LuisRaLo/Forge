@@ -13,7 +13,7 @@ import (
 const runColumns = `id, task_id, step_id, agent, runtime, status, session_id,
 	stop_reason, error, permission_denials, model, input_tokens, output_tokens,
 	cache_read_tokens, cache_creation_tokens, cost_usd, cost_estimated,
-	duration_ms, started_at, finished_at`
+	duration_ms, started_at, finished_at, transcript`
 
 // RunRepo is the SQLite implementation of core.RunRepository.
 type RunRepo struct{ db *DB }
@@ -52,6 +52,10 @@ func (r *RunRepo) Record(ctx context.Context, run *core.AgentRun) (*core.AgentRu
 	if err != nil {
 		return nil, fmt.Errorf("encode permission denials: %w", err)
 	}
+	transcript, err := json.Marshal(saved.Transcript)
+	if err != nil {
+		return nil, fmt.Errorf("encode transcript: %w", err)
+	}
 
 	err = withTx(ctx, r.db.DB, func(tx *sql.Tx) error {
 		res, err := tx.ExecContext(ctx, `
@@ -59,8 +63,9 @@ func (r *RunRepo) Record(ctx context.Context, run *core.AgentRun) (*core.AgentRu
 				task_id, step_id, agent, runtime, status, session_id,
 				stop_reason, error, permission_denials, model, input_tokens,
 				output_tokens, cache_read_tokens, cache_creation_tokens,
-				cost_usd, cost_estimated, duration_ms, started_at, finished_at
-			) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+				cost_usd, cost_estimated, duration_ms, started_at, finished_at,
+				transcript
+			) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 			ON CONFLICT (task_id, step_id) DO UPDATE SET
 				agent = excluded.agent, runtime = excluded.runtime,
 				status = excluded.status, session_id = excluded.session_id,
@@ -73,13 +78,15 @@ func (r *RunRepo) Record(ctx context.Context, run *core.AgentRun) (*core.AgentRu
 				cost_usd = excluded.cost_usd,
 				cost_estimated = excluded.cost_estimated,
 				duration_ms = excluded.duration_ms,
-				started_at = excluded.started_at, finished_at = excluded.finished_at`,
+				started_at = excluded.started_at, finished_at = excluded.finished_at,
+				transcript = excluded.transcript`,
 			saved.TaskID, saved.StepID, saved.Agent, saved.Runtime, string(saved.Status),
 			saved.SessionID, saved.StopReason, saved.Error, string(denials), saved.Usage.Model,
 			saved.Usage.InputTokens, saved.Usage.OutputTokens,
 			saved.Usage.CacheReadTokens, saved.Usage.CacheCreationTokens,
 			nullableCost(saved.Usage.CostUSD), saved.Usage.CostEstimated,
 			saved.Duration.Milliseconds(), formatTime(saved.StartedAt), formatTime(saved.FinishedAt),
+			string(transcript),
 		)
 		if err != nil {
 			return fmt.Errorf("record agent run: %w", err)
@@ -150,13 +157,14 @@ func scanRun(rows *sql.Rows) (*core.AgentRun, error) {
 		costEstimated         bool
 		durationMS            int64
 		startedAt, finishedAt string
+		transcript            string
 	)
 	if err := rows.Scan(
 		&run.ID, &run.TaskID, &run.StepID, &run.Agent, &run.Runtime, &status,
 		&run.SessionID, &run.StopReason, &run.Error, &permissionDenials, &run.Usage.Model,
 		&run.Usage.InputTokens, &run.Usage.OutputTokens,
 		&run.Usage.CacheReadTokens, &run.Usage.CacheCreationTokens,
-		&costUSD, &costEstimated, &durationMS, &startedAt, &finishedAt,
+		&costUSD, &costEstimated, &durationMS, &startedAt, &finishedAt, &transcript,
 	); err != nil {
 		return nil, err
 	}
@@ -164,6 +172,11 @@ func scanRun(rows *sql.Rows) (*core.AgentRun, error) {
 	if permissionDenials != "" {
 		if err := json.Unmarshal([]byte(permissionDenials), &run.PermissionDenials); err != nil {
 			return nil, fmt.Errorf("decode permission denials: %w", err)
+		}
+	}
+	if transcript != "" {
+		if err := json.Unmarshal([]byte(transcript), &run.Transcript); err != nil {
+			return nil, fmt.Errorf("decode transcript: %w", err)
 		}
 	}
 	run.Status = core.RunStatus(status)

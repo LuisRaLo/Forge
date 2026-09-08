@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -50,6 +52,18 @@ func (s *Scheduler) execute(ctx context.Context, t *core.Task) {
 		}
 	}
 
+	s.writeSpecIfMissing(ctx, t, ws)
+
+	// Once the spec commit exists, everything after it — including this
+	// step, whichever step it turns out to be — must verify real work
+	// against the commit that comes after it, not the workspace's true git
+	// fork point. Otherwise the spec commit itself would count as "real
+	// work" the first time a git-write step runs, masking a step that
+	// actually did nothing (see hasRealChanges).
+	if base, ok := t.Metadata[core.SpecCommitMetadataKey]; ok && base != "" {
+		ws.BaseCommit = base
+	}
+
 	stepID := core.StepID(t.Workflow, t.Step, t.Agent, t.Attempts+1)
 
 	runCtx := ctx
@@ -73,11 +87,12 @@ func (s *Scheduler) execute(ctx context.Context, t *core.Task) {
 		req.OutputSchema = gateOutputSchema
 	}
 
+	var transcript []core.TranscriptEntry
 	start := time.Now()
-	result, runErr := rt.Execute(runCtx, req, s.eventSink(t))
+	result, runErr := rt.Execute(runCtx, req, s.eventSink(t, &transcript))
 	duration := time.Since(start)
 
-	s.recordRun(ctx, t, def, runtimeName, stepID, result, runErr, duration)
+	s.recordRun(ctx, t, def, runtimeName, stepID, result, runErr, duration, transcript)
 
 	if runErr != nil {
 		s.handleRunError(ctx, t, def, ws, runErr)
@@ -113,19 +128,26 @@ func (s *Scheduler) buildPrompt(ctx context.Context, t *core.Task, def *core.Age
 	return b.String()
 }
 
-func (s *Scheduler) eventSink(t *core.Task) core.EventSink {
+// eventSink both logs each streamed event (as before) and appends it to
+// transcript, so the run's full activity is preserved for recordRun to
+// attach to the persisted core.AgentRun — not just summarized to the
+// daemon's own log file where an operator could never see it.
+func (s *Scheduler) eventSink(t *core.Task, transcript *[]core.TranscriptEntry) core.EventSink {
 	return func(_ context.Context, ev core.Event) {
 		s.log.Debug("agent event", "task", t.ID, "type", ev.Type, "text", ev.Text)
+		*transcript = append(*transcript, core.TranscriptEntry{
+			Type: ev.Type, Text: ev.Text, Timestamp: ev.Timestamp,
+		})
 	}
 }
 
 func (s *Scheduler) recordRun(
 	ctx context.Context, t *core.Task, def *core.AgentDefinition, runtimeName, stepID string,
-	result *core.RunResult, runErr error, duration time.Duration,
+	result *core.RunResult, runErr error, duration time.Duration, transcript []core.TranscriptEntry,
 ) {
 	run := &core.AgentRun{
 		TaskID: t.ID, StepID: stepID, Agent: def.Name, Runtime: runtimeName,
-		Duration: duration, FinishedAt: s.deps.Clock(),
+		Duration: duration, FinishedAt: s.deps.Clock(), Transcript: transcript,
 	}
 	if runErr != nil {
 		run.Status = core.RunFailed
@@ -296,6 +318,14 @@ func (s *Scheduler) advance(ctx context.Context, t *core.Task, def *core.AgentDe
 			s.rewind(ctx, t, def, verdict)
 			return
 		}
+
+		// A gate step passing (typically QA actually running the test suite —
+		// see agents/qa.yaml) is the one point in the pipeline where the
+		// workspace's commits are independently verified, not just written by
+		// an agent that says it's done. That is exactly the checkpoint an
+		// operator wants their remote copy caught up to, so push here rather
+		// than requiring a separate manual step (`ai-squad pr create`) for it.
+		s.pushIfConfigured(ctx, t, ws)
 	}
 
 	steps, last, err := s.stepInfo(t)
@@ -439,6 +469,149 @@ func (s *Scheduler) hasRealChanges(ctx context.Context, ws *workspace.Workspace)
 		return false, fmt.Errorf("check working tree: %w", err)
 	}
 	return dirty, nil
+}
+
+// writeSpecIfMissing records the task's title and description as a spec
+// file inside the workspace, committed on its own — so "why does this code
+// exist" is answered by the branch's own history, not only by ai-squad's
+// database (which nobody reads once they're looking at the repo itself).
+// Idempotent per task: it no-ops once the file exists, so it is safe to call
+// on every step of a multi-step workflow, not just the first.
+func (s *Scheduler) writeSpecIfMissing(ctx context.Context, t *core.Task, ws *workspace.Workspace) {
+	if s.deps.Git == nil {
+		return
+	}
+	// Already recorded on an earlier step or a prior attempt.
+	if base, ok := t.Metadata[core.SpecCommitMetadataKey]; ok && base != "" {
+		return
+	}
+
+	dir := filepath.Join(ws.Path, "spec", "features")
+	path := filepath.Join(dir, specFileName(t))
+	if _, err := os.Stat(path); err == nil {
+		return
+	} else if !os.IsNotExist(err) {
+		s.log.Warn("check for existing spec file", "task", t.ID, "error", err)
+		return
+	}
+
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		s.log.Warn("create spec directory", "task", t.ID, "error", err)
+		return
+	}
+	if err := os.WriteFile(path, []byte(specMarkdown(t)), 0o644); err != nil {
+		s.log.Warn("write spec file", "task", t.ID, "error", err)
+		return
+	}
+
+	committed, err := s.deps.Git.Commit(ctx, ws.Path, fmt.Sprintf("docs: record spec for %s", t.ID))
+	if err != nil {
+		s.log.Warn("commit spec file", "task", t.ID, "error", err)
+		return
+	}
+	if !committed {
+		s.log.Warn("spec file write produced no commit", "task", t.ID)
+		return
+	}
+
+	head, err := s.deps.Git.HeadCommit(ctx, ws.Path)
+	if err != nil {
+		s.log.Warn("read head commit after spec write", "task", t.ID, "error", err)
+		return
+	}
+
+	if t.Metadata == nil {
+		t.Metadata = map[string]string{}
+	}
+	t.Metadata[core.SpecCommitMetadataKey] = head
+	if err := s.deps.Tasks.Save(ctx, t); err != nil {
+		s.log.Error("record spec base commit on task", "task", t.ID, "error", err)
+	}
+}
+
+// specFileName builds a unique, filesystem-safe name for a task's spec file.
+func specFileName(t *core.Task) string {
+	return fmt.Sprintf("%s-%s.md", strings.ToLower(t.ID), slugify(t.Title))
+}
+
+// specMarkdown renders a task's title, provenance and description as a spec
+// document, matching the shape of spec/features/0000-template.md in a
+// scaffolded ai-squad project.
+func specMarkdown(t *core.Task) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "# %s\n\n", t.Title)
+	fmt.Fprintf(&b, "- Task: %s\n", t.ID)
+	if t.Workflow != "" {
+		fmt.Fprintf(&b, "- Workflow: %s\n", t.Workflow)
+	} else {
+		fmt.Fprintf(&b, "- Agent: %s\n", t.Agent)
+	}
+	if !t.CreatedAt.IsZero() {
+		fmt.Fprintf(&b, "- Created: %s\n", t.CreatedAt.Format("2006-01-02"))
+	}
+	b.WriteString("\n## Description\n\n")
+	if t.Description != "" {
+		b.WriteString(t.Description)
+	} else {
+		b.WriteString("(no description was given)")
+	}
+	b.WriteString("\n")
+	return b.String()
+}
+
+// slugify lowercases s and replaces every run of non-alphanumeric characters
+// with a single hyphen, for building a readable filesystem-safe file name
+// out of a task title.
+func slugify(s string) string {
+	var b strings.Builder
+	lastDash := false
+	for _, r := range strings.ToLower(s) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			lastDash = false
+			continue
+		}
+		if !lastDash && b.Len() > 0 {
+			b.WriteByte('-')
+			lastDash = true
+		}
+	}
+	out := strings.TrimRight(b.String(), "-")
+	if out == "" {
+		return "task"
+	}
+	const maxLen = 60
+	if len(out) > maxLen {
+		out = strings.TrimRight(out[:maxLen], "-")
+	}
+	return out
+}
+
+// pushIfConfigured pushes ws's branch to "origin" once a gate has verified
+// it, so a passing QA/test step is what actually publishes the work — not
+// something the operator has to remember to trigger by hand. It never fails
+// the task: a repository with no remote (e.g. a scaffolded local-only
+// project) or a transient push failure is logged and skipped, since pushing
+// is a convenience on top of an already-completed, already-verified step,
+// not part of its correctness.
+func (s *Scheduler) pushIfConfigured(ctx context.Context, t *core.Task, ws *workspace.Workspace) {
+	if s.deps.Git == nil || ws.Branch == "" {
+		return
+	}
+	hasRemote, err := s.deps.Git.RemoteExists(ctx, ws.Path, "origin")
+	if err != nil {
+		s.log.Warn("check for origin remote before push", "task", t.ID, "error", err)
+		return
+	}
+	if !hasRemote {
+		s.log.Debug("no origin remote configured; skipping push", "task", t.ID, "branch", ws.Branch)
+		return
+	}
+	if err := s.deps.Git.Push(ctx, ws.Path, "origin", ws.Branch); err != nil {
+		s.log.Warn("push branch after gate passed", "task", t.ID, "branch", ws.Branch, "error", err)
+		return
+	}
+	s.log.Info("pushed branch after gate passed", "task", t.ID, "branch", ws.Branch)
 }
 
 func parseGateVerdict(structured json.RawMessage) (*gateVerdict, error) {

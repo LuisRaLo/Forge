@@ -320,6 +320,37 @@ func TestPushToLocalRemote(t *testing.T) {
 	}
 }
 
+func TestRemoteExists(t *testing.T) {
+	t.Parallel()
+	c := New()
+	ctx := context.Background()
+	repo := newTestRepo(t)
+
+	exists, err := c.RemoteExists(ctx, repo, "origin")
+	if err != nil {
+		t.Fatalf("remote exists: %v", err)
+	}
+	if exists {
+		t.Error("expected no origin remote on a freshly created repo")
+	}
+
+	bareDir := t.TempDir()
+	if out, err := exec.Command("git", "init", "-q", "--bare", bareDir).CombinedOutput(); err != nil {
+		t.Fatalf("init bare: %v\n%s", err, out)
+	}
+	if out, err := exec.Command("git", "-C", repo, "remote", "add", "origin", bareDir).CombinedOutput(); err != nil {
+		t.Fatalf("add remote: %v\n%s", err, out)
+	}
+
+	exists, err = c.RemoteExists(ctx, repo, "origin")
+	if err != nil {
+		t.Fatalf("remote exists: %v", err)
+	}
+	if !exists {
+		t.Error("expected origin remote to exist after adding it")
+	}
+}
+
 func TestCurrentBranch(t *testing.T) {
 	t.Parallel()
 	c := New()

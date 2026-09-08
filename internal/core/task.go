@@ -233,3 +233,12 @@ func DecodeSteps(metadata map[string]string) (steps []string, ok bool, err error
 // caller that has access to the runtime registry — internal/core itself
 // has no such registry to check against.
 const RuntimeMetadataKey = "runtime_override"
+
+// SpecCommitMetadataKey is the Task.Metadata key holding the commit hash
+// right after ai-squad wrote this task's spec file into the workspace (see
+// scheduler's writeSpecIfMissing). It exists so that commit is never
+// mistaken for evidence of an agent's own work: hasRealChanges compares
+// against this commit instead of the workspace's true git fork point once
+// it is set, which is what keeps "wrote a docs file" from masking a step
+// that made no real changes.
+const SpecCommitMetadataKey = "spec_base_commit"

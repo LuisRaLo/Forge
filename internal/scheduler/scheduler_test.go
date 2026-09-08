@@ -926,3 +926,52 @@ func TestExecutePersistsWorkspaceBranchOntoTask(t *testing.T) {
 		t.Error("expected task.WorkspacePath persisted")
 	}
 }
+
+// TestExecutePersistsAgentTranscript proves the events a runtime streams
+// through the sink during Execute (assistant text, tool calls, ...) end up
+// on the persisted core.AgentRun, not just in the daemon's own log file —
+// this is what lets an operator see what an agent actually did, not only
+// whether it reported success.
+func TestExecutePersistsAgentTranscript(t *testing.T) {
+	t.Parallel()
+	env := newTestEnv(t, Config{}, devAgent())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	env.runtime.Script(mock.Response{
+		Events: []core.Event{
+			{Type: core.EventTypeAssistantText, Text: "reading the spec"},
+			{Type: core.EventTypeToolUse, Text: "Write(src/main.go)"},
+		},
+	})
+
+	task := env.svc.create(t, ctx, &core.Task{
+		Title: "solo task", Repository: "/repo", Workflow: "solo", Agent: "developer",
+	})
+
+	go env.sched.Run(ctx)
+
+	waitFor(t, 2*time.Second, func() bool {
+		got, err := env.tasks.Get(ctx, task.ID)
+		return err == nil && got.Status == core.StatusCompleted
+	})
+
+	runs, err := env.runs.ListByTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("expected 1 run, got %d", len(runs))
+	}
+	// The mock runtime brackets scripted events with its own started/completed
+	// events, so the 2 scripted events land as entries 1 and 2 of 4.
+	if len(runs[0].Transcript) != 4 {
+		t.Fatalf("expected 4 transcript entries, got %+v", runs[0].Transcript)
+	}
+	if runs[0].Transcript[1].Text != "reading the spec" {
+		t.Errorf("unexpected entry: %+v", runs[0].Transcript[1])
+	}
+	if runs[0].Transcript[2].Type != core.EventTypeToolUse {
+		t.Errorf("unexpected entry: %+v", runs[0].Transcript[2])
+	}
+}

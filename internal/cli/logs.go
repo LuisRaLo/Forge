@@ -16,7 +16,7 @@ type logLine struct {
 }
 
 func newLogsCommand(configPath func() string) *cobra.Command {
-	var asJSON bool
+	var asJSON, transcript bool
 
 	cmd := &cobra.Command{
 		Use:   "logs <task-id>",
@@ -65,6 +65,17 @@ func newLogsCommand(configPath func() string) *cobra.Command {
 				lines = append(lines, logLine{
 					At: r.FinishedAt.Format("2006-01-02T15:04:05Z07:00"), Kind: "run", Text: text,
 				})
+				if transcript {
+					for _, ev := range r.Transcript {
+						evText := string(ev.Type)
+						if ev.Text != "" {
+							evText += ": " + ev.Text
+						}
+						lines = append(lines, logLine{
+							At: ev.Timestamp.Format("2006-01-02T15:04:05Z07:00"), Kind: "agent", Text: evText,
+						})
+					}
+				}
 			}
 			sort.SliceStable(lines, func(i, j int) bool { return lines[i].At < lines[j].At })
 
@@ -84,5 +95,7 @@ func newLogsCommand(configPath func() string) *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "emit logs as JSON")
+	cmd.Flags().BoolVarP(&transcript, "transcript", "t", false,
+		"also show each run's step-by-step agent activity (assistant text, tool calls)")
 	return cmd
 }
