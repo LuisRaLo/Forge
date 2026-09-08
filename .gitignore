@@ -1,0 +1,24 @@
+# Build output
+/bin/
+/ai-squad
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Local runtime data (created by `ai-squad init` / run.sh)
+*.db
+*.db-shm
+*.db-wal
+/worktrees/
+/logs/
+.ai-squad/
+
+# Go
+/vendor/
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
