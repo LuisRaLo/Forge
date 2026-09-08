@@ -7,8 +7,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/santillana/ai-squad/internal/core"
-	"github.com/santillana/ai-squad/internal/yamlx"
+	"github.com/LuisRaLo/ai-squad/internal/core"
+	"github.com/LuisRaLo/ai-squad/internal/yamlx"
 )
 
 // spec is the on-disk YAML shape of an agent. It is deliberately separate from

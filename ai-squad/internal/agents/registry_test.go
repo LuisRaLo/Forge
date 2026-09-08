@@ -6,7 +6,7 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/santillana/ai-squad/internal/core"
+	"github.com/LuisRaLo/ai-squad/internal/core"
 )
 
 const developerYAML = `

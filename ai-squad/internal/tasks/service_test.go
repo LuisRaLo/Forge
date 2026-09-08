@@ -5,9 +5,9 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/santillana/ai-squad/internal/agents"
-	"github.com/santillana/ai-squad/internal/core"
-	"github.com/santillana/ai-squad/internal/storage"
+	"github.com/LuisRaLo/ai-squad/internal/agents"
+	"github.com/LuisRaLo/ai-squad/internal/core"
+	"github.com/LuisRaLo/ai-squad/internal/storage"
 )
 
 // fakeWorkflows is a minimal Workflows implementation for tests.

@@ -7,7 +7,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/santillana/ai-squad/internal/core"
+	"github.com/LuisRaLo/ai-squad/internal/core"
 )
 
 // TestConcurrentCreateAssignsUniqueIDs proves the identifier counter is safe

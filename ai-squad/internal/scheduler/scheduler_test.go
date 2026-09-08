@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/santillana/ai-squad/internal/agents"
-	"github.com/santillana/ai-squad/internal/core"
-	"github.com/santillana/ai-squad/internal/runtimes/mock"
-	"github.com/santillana/ai-squad/internal/storage"
-	"github.com/santillana/ai-squad/internal/workspace"
+	"github.com/LuisRaLo/ai-squad/internal/agents"
+	"github.com/LuisRaLo/ai-squad/internal/core"
+	"github.com/LuisRaLo/ai-squad/internal/runtimes/mock"
+	"github.com/LuisRaLo/ai-squad/internal/storage"
+	"github.com/LuisRaLo/ai-squad/internal/workspace"
 )
 
 // fakeWorkflows is a minimal Workflows implementation for tests.

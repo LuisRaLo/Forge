@@ -10,7 +10,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/santillana/ai-squad/internal/core"
+	"github.com/LuisRaLo/ai-squad/internal/core"
 )
 
 // Workflows resolves a workflow name to its ordered agent steps. It is a

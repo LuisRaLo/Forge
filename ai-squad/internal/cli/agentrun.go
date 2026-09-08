@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/santillana/ai-squad/internal/core"
+	"github.com/LuisRaLo/ai-squad/internal/core"
 )
 
 func newAgentRunCommand(configPath func() string) *cobra.Command {

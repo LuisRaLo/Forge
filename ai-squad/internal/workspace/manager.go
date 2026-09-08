@@ -16,8 +16,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/santillana/ai-squad/internal/core"
-	"github.com/santillana/ai-squad/internal/git"
+	"github.com/LuisRaLo/ai-squad/internal/core"
+	"github.com/LuisRaLo/ai-squad/internal/git"
 )
 
 // DefaultBranchPrefix namespaces branches ai-squad creates for a task, so
@@ -60,6 +60,9 @@ type Manager struct {
 
 	mu    sync.Mutex
 	locks map[string]*sync.Mutex
+
+	repoMu    sync.Mutex
+	repoLocks map[string]*sync.Mutex
 }
 
 // NewManager builds a workspace manager. A nil client uses git.New().
@@ -74,7 +77,10 @@ func NewManager(opts Options, client *git.Client) (*Manager, error) {
 	if prefix == "" {
 		prefix = DefaultBranchPrefix
 	}
-	return &Manager{root: opts.Root, prefix: prefix, git: client, locks: map[string]*sync.Mutex{}}, nil
+	return &Manager{
+		root: opts.Root, prefix: prefix, git: client,
+		locks: map[string]*sync.Mutex{}, repoLocks: map[string]*sync.Mutex{},
+	}, nil
 }
 
 func (m *Manager) lockFor(taskID string) *sync.Mutex {
@@ -84,6 +90,29 @@ func (m *Manager) lockFor(taskID string) *sync.Mutex {
 	if !ok {
 		l = &sync.Mutex{}
 		m.locks[taskID] = l
+	}
+	return l
+}
+
+// repoLockFor serializes git worktree mutations against one repository.
+//
+// git's own `.git/worktrees/<name>/` administrative bookkeeping is not safe
+// under many concurrent `worktree add`/`remove` invocations against the same
+// repository — reproduced directly under this project's own full test suite
+// (many packages spawning git subprocesses at once triggered "failed to read
+// .git/worktrees/.../commondir" in `go test -race` on an otherwise correct,
+// per-task-locked call). The per-task lock above only prevents one task's
+// own Acquire/Release from racing itself; it does nothing for two DIFFERENT
+// tasks mutating the same repository's worktree metadata concurrently. This
+// second lock is keyed by repository path, so unrelated repositories are
+// unaffected and still proceed in parallel.
+func (m *Manager) repoLockFor(repoDir string) *sync.Mutex {
+	m.repoMu.Lock()
+	defer m.repoMu.Unlock()
+	l, ok := m.repoLocks[repoDir]
+	if !ok {
+		l = &sync.Mutex{}
+		m.repoLocks[repoDir] = l
 	}
 	return l
 }
@@ -119,6 +148,10 @@ func (m *Manager) Acquire(ctx context.Context, task *core.Task) (*Workspace, err
 	if branch == "" {
 		branch = m.branchFor(task.ID)
 	}
+
+	repoLock := m.repoLockFor(task.Repository)
+	repoLock.Lock()
+	defer repoLock.Unlock()
 
 	registered, err := m.registeredWorktree(ctx, task.Repository, path)
 	if err != nil {
@@ -196,6 +229,10 @@ func (m *Manager) Release(ctx context.Context, ws *Workspace, opts ReleaseOption
 	lock := m.lockFor(ws.TaskID)
 	lock.Lock()
 	defer lock.Unlock()
+
+	repoLock := m.repoLockFor(ws.RepoDir)
+	repoLock.Lock()
+	defer repoLock.Unlock()
 
 	registered, err := m.registeredWorktree(ctx, ws.RepoDir, ws.Path)
 	if err != nil {

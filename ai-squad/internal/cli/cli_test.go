@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/santillana/ai-squad/internal/core"
+	"github.com/LuisRaLo/ai-squad/internal/core"
 )
 
 // run executes the command tree with the given arguments against an isolated

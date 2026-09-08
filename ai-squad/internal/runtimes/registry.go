@@ -9,10 +9,10 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/santillana/ai-squad/internal/config"
-	"github.com/santillana/ai-squad/internal/core"
-	"github.com/santillana/ai-squad/internal/runtimes/claudecode"
-	"github.com/santillana/ai-squad/internal/runtimes/mock"
+	"github.com/LuisRaLo/ai-squad/internal/config"
+	"github.com/LuisRaLo/ai-squad/internal/core"
+	"github.com/LuisRaLo/ai-squad/internal/runtimes/claudecode"
+	"github.com/LuisRaLo/ai-squad/internal/runtimes/mock"
 )
 
 // Registry resolves runtime names to constructed core.AgentRuntime instances.

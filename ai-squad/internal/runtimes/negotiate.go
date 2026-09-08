@@ -3,7 +3,7 @@ package runtimes
 import (
 	"fmt"
 
-	"github.com/santillana/ai-squad/internal/core"
+	"github.com/LuisRaLo/ai-squad/internal/core"
 )
 
 // Negotiate checks that every agent's required capabilities are a subset of

@@ -6,8 +6,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/santillana/ai-squad/internal/core"
-	"github.com/santillana/ai-squad/internal/tasks"
+	"github.com/LuisRaLo/ai-squad/internal/core"
+	"github.com/LuisRaLo/ai-squad/internal/tasks"
 )
 
 func newTaskCommand(configPath func() string) *cobra.Command {

@@ -23,7 +23,7 @@ import (
 	"os/exec"
 	"time"
 
-	"github.com/santillana/ai-squad/internal/core"
+	"github.com/LuisRaLo/ai-squad/internal/core"
 )
 
 // Verified and unverified, as of live testing against Claude Code 2.1.236 on

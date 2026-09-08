@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/santillana/ai-squad/internal/core"
-	"github.com/santillana/ai-squad/internal/workspace"
+	"github.com/LuisRaLo/ai-squad/internal/core"
+	"github.com/LuisRaLo/ai-squad/internal/workspace"
 )
 
 // execute runs one task's current step to completion: resolve the agent and

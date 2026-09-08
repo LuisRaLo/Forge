@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/santillana/ai-squad/internal/core"
+	"github.com/LuisRaLo/ai-squad/internal/core"
 )
 
 // Response is a scripted result for one request. Match narrows which request

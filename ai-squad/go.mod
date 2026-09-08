@@ -1,4 +1,4 @@
-module github.com/santillana/ai-squad
+module github.com/LuisRaLo/ai-squad
 
 go 1.27.1
 

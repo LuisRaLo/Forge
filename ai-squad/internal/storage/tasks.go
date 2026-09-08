@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/santillana/ai-squad/internal/core"
+	"github.com/LuisRaLo/ai-squad/internal/core"
 )
 
 // timeLayout is the on-disk timestamp format: RFC3339 in UTC with nanosecond

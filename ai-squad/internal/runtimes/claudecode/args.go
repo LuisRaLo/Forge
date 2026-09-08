@@ -3,7 +3,7 @@ package claudecode
 import (
 	"fmt"
 
-	"github.com/santillana/ai-squad/internal/core"
+	"github.com/LuisRaLo/ai-squad/internal/core"
 )
 
 // Built-in Claude Code tool names relevant to permission mapping, verified

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/santillana/ai-squad/internal/core"
+	"github.com/LuisRaLo/ai-squad/internal/core"
 )
 
 func TestToolArgsFilesystemNone(t *testing.T) {

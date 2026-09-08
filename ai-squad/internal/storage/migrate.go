@@ -9,7 +9,7 @@ import (
 	"io/fs"
 	"sort"
 
-	"github.com/santillana/ai-squad/migrations"
+	"github.com/LuisRaLo/ai-squad/migrations"
 )
 
 // migrationsTable records which migrations have been applied.

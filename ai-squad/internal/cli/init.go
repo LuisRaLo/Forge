@@ -10,10 +10,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	agenttemplates "github.com/santillana/ai-squad/agents"
-	configtemplate "github.com/santillana/ai-squad/config"
-	"github.com/santillana/ai-squad/internal/config"
-	"github.com/santillana/ai-squad/internal/storage"
+	agenttemplates "github.com/LuisRaLo/ai-squad/agents"
+	configtemplate "github.com/LuisRaLo/ai-squad/config"
+	"github.com/LuisRaLo/ai-squad/internal/config"
+	"github.com/LuisRaLo/ai-squad/internal/storage"
 )
 
 func newInitCommand(configPath func() string) *cobra.Command {

@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/santillana/ai-squad/internal/core"
+	"github.com/LuisRaLo/ai-squad/internal/core"
 )
 
 // claimNext finds the highest-priority runnable task and claims it,

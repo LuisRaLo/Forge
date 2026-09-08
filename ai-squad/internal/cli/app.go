@@ -7,15 +7,15 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/santillana/ai-squad/internal/agents"
-	"github.com/santillana/ai-squad/internal/config"
-	"github.com/santillana/ai-squad/internal/core"
-	"github.com/santillana/ai-squad/internal/git"
-	"github.com/santillana/ai-squad/internal/runtimes"
-	"github.com/santillana/ai-squad/internal/scheduler"
-	"github.com/santillana/ai-squad/internal/storage"
-	"github.com/santillana/ai-squad/internal/tasks"
-	"github.com/santillana/ai-squad/internal/workspace"
+	"github.com/LuisRaLo/ai-squad/internal/agents"
+	"github.com/LuisRaLo/ai-squad/internal/config"
+	"github.com/LuisRaLo/ai-squad/internal/core"
+	"github.com/LuisRaLo/ai-squad/internal/git"
+	"github.com/LuisRaLo/ai-squad/internal/runtimes"
+	"github.com/LuisRaLo/ai-squad/internal/scheduler"
+	"github.com/LuisRaLo/ai-squad/internal/storage"
+	"github.com/LuisRaLo/ai-squad/internal/tasks"
+	"github.com/LuisRaLo/ai-squad/internal/workspace"
 )
 
 // App holds the dependencies a command needs. It is constructed per command

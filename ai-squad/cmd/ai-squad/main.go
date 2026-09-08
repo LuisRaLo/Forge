@@ -9,7 +9,7 @@ package main
 import (
 	"os"
 
-	"github.com/santillana/ai-squad/internal/cli"
+	"github.com/LuisRaLo/ai-squad/internal/cli"
 )
 
 func main() {

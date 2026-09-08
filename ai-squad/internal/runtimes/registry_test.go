@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/santillana/ai-squad/internal/config"
-	"github.com/santillana/ai-squad/internal/core"
+	"github.com/LuisRaLo/ai-squad/internal/config"
+	"github.com/LuisRaLo/ai-squad/internal/core"
 )
 
 func TestBuildConstructsMockRuntime(t *testing.T) {

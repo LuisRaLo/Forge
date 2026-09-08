@@ -11,8 +11,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/santillana/ai-squad/internal/core"
-	"github.com/santillana/ai-squad/internal/yamlx"
+	"github.com/LuisRaLo/ai-squad/internal/core"
+	"github.com/LuisRaLo/ai-squad/internal/yamlx"
 )
 
 const (

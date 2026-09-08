@@ -2,7 +2,7 @@
 package config
 
 import (
-	"github.com/santillana/ai-squad/internal/yamlx"
+	"github.com/LuisRaLo/ai-squad/internal/yamlx"
 )
 
 // RuntimeType identifies a family of AgentRuntime implementations.

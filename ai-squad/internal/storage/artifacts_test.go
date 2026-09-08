@@ -6,7 +6,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/santillana/ai-squad/internal/core"
+	"github.com/LuisRaLo/ai-squad/internal/core"
 )
 
 func TestArtifactSaveAndListByTask(t *testing.T) {

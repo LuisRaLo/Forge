@@ -19,8 +19,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/santillana/ai-squad/internal/core"
-	"github.com/santillana/ai-squad/internal/workspace"
+	"github.com/LuisRaLo/ai-squad/internal/core"
+	"github.com/LuisRaLo/ai-squad/internal/workspace"
 )
 
 // gateOutputSchema is the fixed structured-output shape a gated step's

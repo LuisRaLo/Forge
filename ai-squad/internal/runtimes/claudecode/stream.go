@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/santillana/ai-squad/internal/core"
+	"github.com/LuisRaLo/ai-squad/internal/core"
 )
 
 // resultLine mirrors the fields observed from
