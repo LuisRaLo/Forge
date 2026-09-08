@@ -149,6 +149,13 @@
     <div class="steps" id="steps"></div>
   </div>
 
+  <div class="field">
+    <label for="runtime">Runtime <span class="muted">(who resolves this spec)</span></label>
+    <select id="runtime">
+      <option value="">Default (per-agent config)</option>
+    </select>
+  </div>
+
   <button id="create-btn">Create &amp; run</button>
   <div class="muted" id="create-error" style="font-size:12px;"></div>
 </aside>
@@ -156,7 +163,7 @@
 <main>
   <table>
     <thead>
-      <tr><th>ID</th><th>Title</th><th>Status</th><th>Agent</th><th>Step</th><th>Prio</th><th>Updated</th></tr>
+      <tr><th>ID</th><th>Title</th><th>Status</th><th>Agent</th><th>Runtime</th><th>Step</th><th>Prio</th><th>Updated</th></tr>
     </thead>
     <tbody id="task-rows"></tbody>
   </table>
@@ -185,6 +192,15 @@ function fmtTime(iso) {
   if (!iso) return "-";
   const d = new Date(iso);
   return d.toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", second: "2-digit"});
+}
+
+// Go's time.Duration serializes as an integer number of nanoseconds.
+function fmtDuration(ns) {
+  if (ns == null) return "-";
+  const s = ns / 1e9;
+  if (s < 1) return Math.round(ns / 1e6) + "ms";
+  if (s < 60) return s.toFixed(1) + "s";
+  return Math.floor(s / 60) + "m" + Math.round(s % 60) + "s";
 }
 
 function badge(status) {
@@ -219,6 +235,18 @@ function selectedSteps() {
   return [...document.querySelectorAll("#steps input:checked")].map(i => i.value);
 }
 
+async function loadRuntimes() {
+  const res = await fetch("/api/runtimes");
+  const names = await res.json();
+  const select = document.getElementById("runtime");
+  for (const name of (names || [])) {
+    const opt = document.createElement("option");
+    opt.value = name;
+    opt.textContent = name;
+    select.appendChild(opt);
+  }
+}
+
 function renderRow(task) {
   let row = document.getElementById("row-" + task.id);
   const isNew = !row;
@@ -233,6 +261,7 @@ function renderRow(task) {
     <td>${escapeHtml(task.title)}</td>
     <td>${badge(task.status)}</td>
     <td class="muted">${task.agent || "-"}</td>
+    <td class="muted">${(task.metadata && task.metadata.runtime_override) || "default"}</td>
     <td class="muted">${task.step ?? 0}</td>
     <td class="muted">${task.priority}</td>
     <td class="muted">${fmtTime(task.updated_at)}</td>
@@ -278,7 +307,7 @@ async function openDetail(id) {
   }
   for (const r of (detail.runs || [])) {
     const cost = r.usage && r.usage.cost_usd != null ? ` cost=$${r.usage.cost_usd.toFixed(4)}` : "";
-    lines.push({at: r.finished_at, text: `run agent=${r.agent} status=${r.status} duration=${r.duration}${cost}`});
+    lines.push({at: r.finished_at, text: `run agent=${r.agent} status=${r.status} duration=${fmtDuration(r.duration)}${cost}`});
   }
   lines.sort((a, b) => (a.at || "").localeCompare(b.at || ""));
 
@@ -344,6 +373,7 @@ document.getElementById("create-btn").addEventListener("click", async () => {
     repository: document.getElementById("repository").value.trim(),
     priority: document.getElementById("priority").value,
     steps,
+    runtime: document.getElementById("runtime").value,
   };
   const res = await fetch("/api/tasks", {
     method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body),
@@ -383,6 +413,7 @@ function connect() {
 }
 
 loadAgents();
+loadRuntimes();
 connect();
 </script>
 </body>

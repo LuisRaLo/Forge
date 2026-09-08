@@ -47,12 +47,30 @@ type App struct {
 // startup (internal/runtimes.Negotiate), applied here to a dynamic,
 // per-task choice instead. Called once, at task-creation time; the
 // scheduler trusts the answer afterward.
-func (a *App) CheckRuntimeOverride(runtimeName string, steps []string) error {
+//
+// workflow/agent/steps mirror tasks.CreateParams' own "exactly one of"
+// fields, resolved the same way tasks.Service.Create resolves them, so a
+// caller can validate before ever calling Create — an incompatible choice
+// is then a clean 400 at task-creation time, not a step that claims,
+// starts to execute, and fails.
+func (a *App) CheckRuntimeOverride(runtimeName, workflow, agent string, steps []string) error {
 	rt, err := a.Runtimes.Runtime(runtimeName)
 	if err != nil {
 		return err
 	}
-	for _, agentName := range steps {
+
+	resolved := steps
+	if workflow != "" {
+		wf, err := a.Cfg.Workflow(workflow)
+		if err != nil {
+			return err
+		}
+		resolved = wf.Steps
+	} else if agent != "" {
+		resolved = []string{agent}
+	}
+
+	for _, agentName := range resolved {
 		def, err := a.Agents.Get(agentName)
 		if err != nil {
 			return err

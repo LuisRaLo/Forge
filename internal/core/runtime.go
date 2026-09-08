@@ -177,16 +177,16 @@ func (s EventSink) Emit(ctx context.Context, ev Event) {
 // left at their zero value; CostUSD is a pointer so "unknown" is
 // distinguishable from "free".
 type Usage struct {
-	Model               string
-	InputTokens         int64
-	OutputTokens        int64
-	CacheReadTokens     int64
-	CacheCreationTokens int64
-	CostUSD             *float64
+	Model               string   `json:"model,omitempty"`
+	InputTokens         int64    `json:"input_tokens,omitempty"`
+	OutputTokens        int64    `json:"output_tokens,omitempty"`
+	CacheReadTokens     int64    `json:"cache_read_tokens,omitempty"`
+	CacheCreationTokens int64    `json:"cache_creation_tokens,omitempty"`
+	CostUSD             *float64 `json:"cost_usd,omitempty"`
 	// CostEstimated marks CostUSD as computed by us from a price table rather
 	// than reported by the provider. Cost limits enforced against an
 	// estimate must be surfaced to the user as estimates.
-	CostEstimated bool
+	CostEstimated bool `json:"cost_estimated,omitempty"`
 }
 
 // RunResult is the outcome of one agent step.

@@ -540,3 +540,34 @@ func TestCreateAdHocStepsDoesNotMutateCallerMetadata(t *testing.T) {
 		t.Error("caller-supplied metadata must survive alongside the encoded steps")
 	}
 }
+
+func TestCreateStoresRuntimeOverride(t *testing.T) {
+	t.Parallel()
+	svc, _ := newTestService(t)
+
+	task, err := svc.Create(context.Background(), CreateParams{
+		Title: "local run", Agent: "developer", Runtime: "local",
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if task.Metadata[core.RuntimeMetadataKey] != "local" {
+		t.Errorf("expected runtime override stored, got metadata %v", task.Metadata)
+	}
+}
+
+func TestCreateRuntimeOverrideDoesNotMutateCallerMetadata(t *testing.T) {
+	t.Parallel()
+	svc, _ := newTestService(t)
+
+	original := map[string]string{"source": "ui"}
+	_, err := svc.Create(context.Background(), CreateParams{
+		Title: "t", Agent: "developer", Runtime: "local", Metadata: original,
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, present := original[core.RuntimeMetadataKey]; present {
+		t.Fatal("Create must not mutate the caller's metadata map")
+	}
+}

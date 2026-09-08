@@ -159,6 +159,26 @@ type singleRuntime struct{ rt core.AgentRuntime }
 func (r singleRuntime) Runtime(string) (core.AgentRuntime, error) { return r.rt, nil }
 func (r singleRuntime) Names() []string                           { return []string{"mock"} }
 
+// namedRuntimes resolves distinct runtimes by name, for proving that a
+// per-task runtime override (core.RuntimeMetadataKey) actually changes
+// which runtime executes a task.
+type namedRuntimes map[string]core.AgentRuntime
+
+func (r namedRuntimes) Runtime(name string) (core.AgentRuntime, error) {
+	rt, ok := r[name]
+	if !ok {
+		return nil, core.ErrNotFound
+	}
+	return rt, nil
+}
+func (r namedRuntimes) Names() []string {
+	out := make([]string, 0, len(r))
+	for name := range r {
+		out = append(out, name)
+	}
+	return out
+}
+
 func devAgent() *core.AgentDefinition {
 	return &core.AgentDefinition{
 		Name: "developer", Runtime: "mock", SystemPrompt: "p",
@@ -815,4 +835,63 @@ func mustEncodeSteps(t *testing.T, steps ...string) map[string]string {
 		t.Fatalf("encode steps: %v", err)
 	}
 	return map[string]string{core.StepsMetadataKey: encoded}
+}
+
+func TestPerTaskRuntimeOverrideRoutesExecution(t *testing.T) {
+	t.Parallel()
+	env := newTestEnv(t, Config{}, devAgent())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	altRuntime := mock.New("alt", nil)
+	env.sched.deps.Runtimes = namedRuntimes{"mock": env.runtime, "alt": altRuntime}
+	// A per-task override wins over the agent's own configured binding
+	// ("mock", per RuntimeFor's fallback in newTestEnv).
+	env.sched.deps.RuntimeFor = func(t *core.Task) string {
+		if override := t.Metadata[core.RuntimeMetadataKey]; override != "" {
+			return override
+		}
+		return "mock"
+	}
+
+	overridden := env.svc.create(t, ctx, &core.Task{
+		Title: "runs on alt", Repository: "/repo", Agent: "developer",
+		Metadata: map[string]string{core.RuntimeMetadataKey: "alt"},
+	})
+	defaultTask := env.svc.create(t, ctx, &core.Task{
+		Title: "runs on mock", Repository: "/repo", Agent: "developer",
+	})
+
+	go env.sched.Run(ctx)
+
+	waitFor(t, 3*time.Second, func() bool {
+		a, errA := env.tasks.Get(ctx, overridden.ID)
+		b, errB := env.tasks.Get(ctx, defaultTask.ID)
+		return errA == nil && errB == nil && a.Status == core.StatusCompleted && b.Status == core.StatusCompleted
+	})
+
+	altCalls, mockCalls := 0, 0
+	for _, c := range altRuntime.Calls() {
+		if c.TaskID == overridden.ID {
+			altCalls++
+		}
+	}
+	for _, c := range env.runtime.Calls() {
+		if c.TaskID == defaultTask.ID {
+			mockCalls++
+		}
+	}
+	if altCalls != 1 {
+		t.Errorf("expected the overridden task to execute on the alt runtime once, got %d", altCalls)
+	}
+	if mockCalls != 1 {
+		t.Errorf("expected the default task to execute on the mock runtime once, got %d", mockCalls)
+	}
+
+	// And the override must never have leaked onto the default task.
+	for _, c := range altRuntime.Calls() {
+		if c.TaskID == defaultTask.ID {
+			t.Fatal("the default task must not have run on the alt runtime")
+		}
+	}
 }

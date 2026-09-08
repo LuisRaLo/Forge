@@ -98,53 +98,62 @@ func ParsePriority(s string) (Priority, error) {
 }
 
 // Task is the unit of work the orchestrator schedules and persists.
+//
+// JSON tags matter here beyond convention: this type is served directly by
+// internal/web's REST and WebSocket endpoints, and the frontend
+// (internal/web/static/index.html) reads these exact snake_case keys. A
+// struct with no tags would serialize as Go's PascalCase field names
+// instead, which is what let a very real bug ship — the dashboard read
+// task.status/task.agent/task.id etc., got undefined for all of them, and
+// silently rendered nothing. Keep frontend field access and these tags in
+// sync; there is no compiler check tying them together.
 type Task struct {
-	ID          string
-	Title       string
-	Description string
+	ID          string `json:"id"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
 
 	// Repository is the absolute path of the git repository to work in.
-	Repository string
+	Repository string `json:"repository"`
 	// Branch is the target branch for the work.
-	Branch string
+	Branch string `json:"branch"`
 
 	// Workflow names the step sequence to execute (e.g. "feature").
-	Workflow string
+	Workflow string `json:"workflow"`
 	// Step is the index of the current workflow step.
-	Step int
+	Step int `json:"step"`
 	// Agent is the agent responsible for the current step.
-	Agent string
+	Agent string `json:"agent"`
 
-	Status   TaskStatus
-	Priority Priority
+	Status   TaskStatus `json:"status"`
+	Priority Priority   `json:"priority"`
 
 	// Attempts counts executions of the current step; MaxAttempts caps them
 	// so a failing QA loop terminates in BLOCKED instead of spinning.
-	Attempts    int
-	MaxAttempts int
+	Attempts    int `json:"attempts"`
+	MaxAttempts int `json:"max_attempts"`
 
 	// ParentTaskID links subtasks to their parent. Nil for root tasks.
-	ParentTaskID *string
+	ParentTaskID *string `json:"parent_task_id,omitempty"`
 
 	// WorkspacePath is the git worktree assigned to this task, if any.
-	WorkspacePath string
+	WorkspacePath string `json:"workspace_path,omitempty"`
 
 	// LastError holds the most recent failure message. It must be redacted
 	// before it is written here.
-	LastError string
+	LastError string `json:"last_error,omitempty"`
 
 	// IdempotencyKey, when set, is unique across all tasks. It lets a
 	// caller retry a create without risking a duplicate task.
-	IdempotencyKey string
+	IdempotencyKey string `json:"idempotency_key,omitempty"`
 
 	// Metadata is free-form, string-valued so it can never smuggle
 	// unserialisable state into the database.
-	Metadata map[string]string
+	Metadata map[string]string `json:"metadata,omitempty"`
 
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
-	StartedAt   *time.Time
-	CompletedAt *time.Time
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
+	StartedAt   *time.Time `json:"started_at,omitempty"`
+	CompletedAt *time.Time `json:"completed_at,omitempty"`
 }
 
 // Validate checks the invariants required to persist a task.

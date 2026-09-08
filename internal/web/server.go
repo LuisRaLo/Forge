@@ -38,11 +38,17 @@ type Deps struct {
 	Runs      core.RunRepository
 	Artifacts core.ArtifactRepository
 	Agents    *agents.Registry
+	Runtimes  core.RuntimeResolver
 	Bus       *events.Bus
 	// EffectiveRuntime resolves the runtime an agent will execute on,
 	// honouring a configuration override — purely informational for the UI.
 	EffectiveRuntime func(*core.AgentDefinition) string
-	Log              *slog.Logger
+	// CheckRuntimeOverride validates a candidate per-task runtime override
+	// (see createTaskRequest.Runtime) against whichever step source the
+	// request used — a clean rejection here means a bad choice never
+	// reaches Tasks.Create. Required when Runtimes is set.
+	CheckRuntimeOverride func(runtimeName, workflow, agent string, steps []string) error
+	Log                  *slog.Logger
 }
 
 // Server serves the dashboard.
@@ -80,6 +86,7 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /", http.FileServer(http.FS(static)))
 
 	s.mux.HandleFunc("GET /api/agents", s.handleListAgents)
+	s.mux.HandleFunc("GET /api/runtimes", s.handleListRuntimes)
 	s.mux.HandleFunc("GET /api/tasks", s.handleListTasks)
 	s.mux.HandleFunc("POST /api/tasks", s.handleCreateTask)
 	s.mux.HandleFunc("GET /api/tasks/{id}", s.handleShowTask)
@@ -95,6 +102,17 @@ func (s *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
 		out[i] = newAgentView(def, s.deps.EffectiveRuntime(def))
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// handleListRuntimes reports the configured runtime names, so the UI's
+// "who resolves my spec" selector reflects whatever is actually wired up
+// (Claude Code, a local Ollama model, ...) rather than a hardcoded list.
+func (s *Server) handleListRuntimes(w http.ResponseWriter, r *http.Request) {
+	var names []string
+	if s.deps.Runtimes != nil {
+		names = s.deps.Runtimes.Names()
+	}
+	writeJSON(w, http.StatusOK, names)
 }
 
 func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {
@@ -117,6 +135,11 @@ type createTaskRequest struct {
 	Agent       string   `json:"agent"`
 	Steps       []string `json:"steps"`
 	Priority    string   `json:"priority"`
+	// Runtime, when set, is a per-task override of who resolves this task's
+	// pipeline — "who resolves my spec" — in place of each agent's own
+	// configured runtime binding. Validated against every step's agent
+	// before the task is ever created.
+	Runtime string `json:"runtime"`
 }
 
 func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
@@ -136,10 +159,17 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		priority = p
 	}
 
+	if req.Runtime != "" && s.deps.CheckRuntimeOverride != nil {
+		if err := s.deps.CheckRuntimeOverride(req.Runtime, req.Workflow, req.Agent, req.Steps); err != nil {
+			writeError(w, err)
+			return
+		}
+	}
+
 	task, err := s.deps.Tasks.Create(r.Context(), tasks.CreateParams{
 		Title: req.Title, Description: req.Description, Repository: req.Repository,
 		Branch: req.Branch, Workflow: req.Workflow, Agent: req.Agent, Steps: req.Steps,
-		Priority: priority,
+		Runtime: req.Runtime, Priority: priority,
 	})
 	if err != nil {
 		writeError(w, err)

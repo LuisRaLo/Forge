@@ -26,32 +26,32 @@ func (s RunStatus) Valid() bool {
 
 // AgentRun records one execution of one agent step, including what it cost.
 type AgentRun struct {
-	ID     int64
-	TaskID string
+	ID     int64  `json:"id"`
+	TaskID string `json:"task_id"`
 
 	// StepID identifies one attempt of one workflow step. It embeds the
 	// attempt number so that recording is idempotent across retries.
-	StepID string
+	StepID string `json:"step_id"`
 
-	Agent      string
-	Runtime    string
-	Status     RunStatus
-	SessionID  string
-	StopReason string
+	Agent      string    `json:"agent"`
+	Runtime    string    `json:"runtime"`
+	Status     RunStatus `json:"status"`
+	SessionID  string    `json:"session_id,omitempty"`
+	StopReason string    `json:"stop_reason,omitempty"`
 
 	// Error is redacted before it reaches this field.
-	Error string
+	Error string `json:"error,omitempty"`
 
 	// PermissionDenials records policy refusals the runtime reported (see
 	// RunResult.PermissionDenials). Part of the audit trail: an agent
 	// hitting a permission wall is a security-relevant event, not something
 	// to discard once observed.
-	PermissionDenials []string
+	PermissionDenials []string `json:"permission_denials,omitempty"`
 
-	Usage      Usage
-	Duration   time.Duration
-	StartedAt  time.Time
-	FinishedAt time.Time
+	Usage      Usage         `json:"usage"`
+	Duration   time.Duration `json:"duration"`
+	StartedAt  time.Time     `json:"started_at"`
+	FinishedAt time.Time     `json:"finished_at"`
 }
 
 // StepID builds the canonical step identifier for a task attempt.

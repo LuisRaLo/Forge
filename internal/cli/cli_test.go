@@ -285,7 +285,7 @@ func TestJSONOutputIsMachineReadable(t *testing.T) {
 	if !strings.HasPrefix(strings.TrimSpace(out), "[") {
 		t.Errorf("expected a JSON array, got:\n%s", out)
 	}
-	if !strings.Contains(out, `"ID": "TASK-1"`) {
+	if !strings.Contains(out, `"id": "TASK-1"`) {
 		t.Errorf("expected the task in JSON, got:\n%s", out)
 	}
 

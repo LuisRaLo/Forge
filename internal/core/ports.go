@@ -58,12 +58,12 @@ type TaskRepository interface {
 
 // TaskEvent is one recorded state change, forming the task audit log.
 type TaskEvent struct {
-	ID         int64
-	TaskID     string
-	FromStatus TaskStatus
-	ToStatus   TaskStatus
-	Reason     string
-	CreatedAt  time.Time
+	ID         int64      `json:"id"`
+	TaskID     string     `json:"task_id"`
+	FromStatus TaskStatus `json:"from_status,omitempty"`
+	ToStatus   TaskStatus `json:"to_status"`
+	Reason     string     `json:"reason,omitempty"`
+	CreatedAt  time.Time  `json:"created_at"`
 }
 
 // AgentRegistry resolves agent definitions by name.

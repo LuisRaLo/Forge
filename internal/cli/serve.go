@@ -55,6 +55,8 @@ func newServeCommand(configPath func() string) *cobra.Command {
 func newDashboardServer(app *App) (*web.Server, error) {
 	return web.New(web.Deps{
 		Tasks: app.Tasks, Repo: app.Repo, Runs: app.Runs, Artifacts: app.Artifacts,
-		Agents: app.Agents, Bus: app.Events, EffectiveRuntime: app.EffectiveRuntime,
+		Agents: app.Agents, Runtimes: app.Runtimes, Bus: app.Events,
+		EffectiveRuntime:     app.EffectiveRuntime,
+		CheckRuntimeOverride: app.CheckRuntimeOverride,
 	})
 }

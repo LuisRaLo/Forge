@@ -10,13 +10,13 @@ import (
 // (or a human) to read. Agents communicate only through artifacts and task
 // state, never directly with one another.
 type Artifact struct {
-	ID        int64
-	TaskID    string
-	StepID    string
-	Name      string
-	Agent     string
-	Content   json.RawMessage
-	CreatedAt time.Time
+	ID        int64           `json:"id"`
+	TaskID    string          `json:"task_id"`
+	StepID    string          `json:"step_id"`
+	Name      string          `json:"name"`
+	Agent     string          `json:"agent"`
+	Content   json.RawMessage `json:"content"`
+	CreatedAt time.Time       `json:"created_at"`
 }
 
 // ArtifactRepository persists artifacts.

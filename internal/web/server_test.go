@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +18,7 @@ import (
 	"github.com/LuisRaLo/ai-squad/internal/agents"
 	"github.com/LuisRaLo/ai-squad/internal/core"
 	"github.com/LuisRaLo/ai-squad/internal/events"
+	"github.com/LuisRaLo/ai-squad/internal/runtimes/mock"
 	"github.com/LuisRaLo/ai-squad/internal/storage"
 	"github.com/LuisRaLo/ai-squad/internal/tasks"
 )
@@ -64,9 +67,36 @@ func newTestServer(t *testing.T) (*httptest.Server, core.TaskRepository, *events
 		t.Fatalf("service: %v", err)
 	}
 
+	runtimeRegistry := fakeRuntimeResolver{
+		"mock":    mock.New("mock", nil),
+		"limited": mock.New("limited", core.NewCapabilitySet(core.CapabilityFilesystemRead)),
+	}
+	checkOverride := func(runtimeName, workflow, agent string, steps []string) error {
+		rt, err := runtimeRegistry.Runtime(runtimeName)
+		if err != nil {
+			return err
+		}
+		names := steps
+		if agent != "" {
+			names = []string{agent}
+		}
+		for _, n := range names {
+			def, err := registry.Get(n)
+			if err != nil {
+				return err
+			}
+			if missing := rt.Capabilities().Missing(def.RequiredCapabilities()); len(missing) > 0 {
+				return fmt.Errorf("runtime %q cannot run step %q: missing %v: %w",
+					runtimeName, n, missing, core.ErrValidation)
+			}
+		}
+		return nil
+	}
+
 	srv, err := New(Deps{
 		Tasks: svc, Repo: repo, Runs: storage.NewRunRepo(db), Artifacts: storage.NewArtifactRepo(db, core.SystemClock),
-		Agents: registry, Bus: &bus,
+		Agents: registry, Runtimes: runtimeRegistry, Bus: &bus,
+		CheckRuntimeOverride: checkOverride,
 	})
 	if err != nil {
 		t.Fatalf("new server: %v", err)
@@ -276,5 +306,104 @@ func TestNewRejectsMissingDeps(t *testing.T) {
 	t.Parallel()
 	if _, err := New(Deps{}); err == nil {
 		t.Fatal("expected an error for missing dependencies")
+	}
+}
+
+type fakeRuntimeResolver map[string]core.AgentRuntime
+
+func (r fakeRuntimeResolver) Runtime(name string) (core.AgentRuntime, error) {
+	rt, ok := r[name]
+	if !ok {
+		return nil, core.ErrNotFound
+	}
+	return rt, nil
+}
+func (r fakeRuntimeResolver) Names() []string {
+	out := make([]string, 0, len(r))
+	for name := range r {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func TestListRuntimes(t *testing.T) {
+	t.Parallel()
+	ts, _, _ := newTestServer(t)
+
+	resp, err := http.Get(ts.URL + "/api/runtimes")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	defer resp.Body.Close()
+	var names []string
+	if err := json.NewDecoder(resp.Body).Decode(&names); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(names) != 2 || names[0] != "limited" || names[1] != "mock" {
+		t.Errorf("unexpected runtimes: %v", names)
+	}
+}
+
+func TestCreateTaskWithCompatibleRuntimeOverride(t *testing.T) {
+	t.Parallel()
+	ts, _, _ := newTestServer(t)
+
+	body := `{"title":"t","agent":"developer","runtime":"mock"}`
+	resp, err := http.Post(ts.URL+"/api/tasks", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", resp.StatusCode)
+	}
+	var task core.Task
+	json.NewDecoder(resp.Body).Decode(&task)
+	if task.Metadata["runtime_override"] != "mock" {
+		t.Errorf("expected the override recorded, got metadata %v", task.Metadata)
+	}
+}
+
+func TestCreateTaskRejectsIncompatibleRuntimeOverride(t *testing.T) {
+	t.Parallel()
+	ts, _, _ := newTestServer(t)
+
+	// "qa" is gated (requires structured output); "limited" only declares
+	// filesystem_read, so this must be rejected before any task is created.
+	body := `{"title":"t","agent":"qa","runtime":"limited"}`
+	resp, err := http.Post(ts.URL+"/api/tasks", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", resp.StatusCode)
+	}
+
+	list, err := http.Get(ts.URL + "/api/tasks")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	defer list.Body.Close()
+	var tasks []*core.Task
+	json.NewDecoder(list.Body).Decode(&tasks)
+	if len(tasks) != 0 {
+		t.Fatalf("a rejected override must not create a task, got %d", len(tasks))
+	}
+}
+
+func TestCreateTaskRejectsUnknownRuntime(t *testing.T) {
+	t.Parallel()
+	ts, _, _ := newTestServer(t)
+
+	body := `{"title":"t","agent":"developer","runtime":"ghost"}`
+	resp, err := http.Post(ts.URL+"/api/tasks", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", resp.StatusCode)
 	}
 }
