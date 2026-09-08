@@ -45,6 +45,15 @@ type Workspaces interface {
 	Release(ctx context.Context, ws *workspace.Workspace, opts workspace.ReleaseOptions) error
 }
 
+// GitStatus is the subset of git operations the scheduler needs to verify
+// that a step which reports success actually changed something — see
+// advance()'s use of it. Optional: a nil Deps.Git skips that verification
+// entirely (e.g. for a runtime/agent shape where it wouldn't make sense).
+type GitStatus interface {
+	IsDirty(ctx context.Context, dir string) (bool, error)
+	CommitsSince(ctx context.Context, dir, baseCommit string) (int, error)
+}
+
 // Config bounds scheduler behaviour.
 type Config struct {
 	MaxConcurrency int
@@ -74,7 +83,9 @@ type Deps struct {
 	Agents     core.AgentRegistry
 	Runtimes   core.RuntimeResolver
 	Workspaces Workspaces
-	Workflows  Workflows
+	// Git is optional; see GitStatus's doc comment.
+	Git       GitStatus
+	Workflows Workflows
 	// RuntimeFor resolves the runtime name a task's current step executes
 	// on: a per-task override (core.RuntimeMetadataKey — "who resolves my
 	// spec," chosen at creation time) wins over the agent's own configured

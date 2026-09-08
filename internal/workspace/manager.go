@@ -40,6 +40,12 @@ type Workspace struct {
 	RepoDir string
 	Path    string
 	Branch  string
+	// BaseCommit is RepoDir's HEAD at the moment this workspace's branch was
+	// created — the point the task's work forked from. It lets a caller
+	// distinguish "nothing happened in this step" from "the agent made and
+	// committed real changes" by counting commits since this point, rather
+	// than trusting the agent's own report of what it did.
+	BaseCommit string
 }
 
 // Manager creates, reuses and removes per-task git worktrees.
@@ -162,6 +168,7 @@ func (m *Manager) Acquire(ctx context.Context, task *core.Task) (*Workspace, err
 		if registered.Branch != "" {
 			ws.Branch = registered.Branch
 		}
+		ws.BaseCommit = m.baseCommitFor(ctx, task.Repository, ws.Branch)
 		return ws, nil
 	}
 
@@ -185,7 +192,28 @@ func (m *Manager) Acquire(ctx context.Context, task *core.Task) (*Workspace, err
 		return nil, fmt.Errorf("create worktree for %s: %w", task.ID, err)
 	}
 
-	return &Workspace{TaskID: task.ID, RepoDir: task.Repository, Path: path, Branch: branch}, nil
+	ws := &Workspace{TaskID: task.ID, RepoDir: task.Repository, Path: path, Branch: branch}
+	ws.BaseCommit = m.baseCommitFor(ctx, task.Repository, branch)
+	return ws, nil
+}
+
+// baseCommitFor returns the commit where branch diverged from repoDir's own
+// current branch — the fork point a caller can diff against to tell whether
+// any real work has happened yet. Best-effort: on any error (e.g. repoDir
+// happens to be in a detached-HEAD state), it returns "", and callers must
+// treat that as "unknown" rather than "no changes," never fail Acquire over
+// it — this is a diagnostic aid, not a correctness requirement for
+// workspace creation itself.
+func (m *Manager) baseCommitFor(ctx context.Context, repoDir, branch string) string {
+	repoBranch, err := m.git.CurrentBranch(ctx, repoDir)
+	if err != nil {
+		return ""
+	}
+	base, err := m.git.MergeBase(ctx, repoDir, branch, repoBranch)
+	if err != nil {
+		return ""
+	}
+	return base
 }
 
 // registeredWorktree returns the git-registered entry at path, or nil if

@@ -199,7 +199,7 @@ func open(ctx context.Context, configPath string) (*App, error) {
 		MaxDailyCostUSD:   cfg.Limits.MaxDailyCostUSD,
 	}, scheduler.Deps{
 		Tasks: repo, Runs: runRepo, Artifacts: artifactRepo,
-		Agents: registry, Runtimes: runtimeRegistry, Workspaces: workspaces,
+		Agents: registry, Runtimes: runtimeRegistry, Workspaces: workspaces, Git: git.New(),
 		Workflows: workflows{cfg: cfg}, RuntimeFor: taskRuntimeFor, Log: logger,
 	})
 	if err != nil {

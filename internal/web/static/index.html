@@ -163,7 +163,7 @@
 <main>
   <table>
     <thead>
-      <tr><th>ID</th><th>Title</th><th>Status</th><th>Agent</th><th>Runtime</th><th>Step</th><th>Prio</th><th>Updated</th></tr>
+      <tr><th>ID</th><th>Title</th><th>Status</th><th>Agent</th><th>Runtime</th><th>Branch</th><th>Step</th><th>Prio</th><th>Updated</th></tr>
     </thead>
     <tbody id="task-rows"></tbody>
   </table>
@@ -175,8 +175,10 @@
       <span class="badge" id="detail-status"></span>
       <button class="secondary" id="detail-cancel">Cancel</button>
       <button class="secondary" id="detail-retry">Retry</button>
+      <button class="secondary" id="detail-copy">Copy logs</button>
       <button class="secondary" id="detail-close">Close</button>
     </div>
+    <div id="detail-branch" class="muted" style="font-family: var(--mono); font-size: 12px; margin-bottom: 10px;"></div>
     <div class="timeline" id="detail-timeline"></div>
   </div>
 </main>
@@ -184,6 +186,7 @@
 <script>
 const tasksById = new Map();
 let selectedTaskId = null;
+let currentLogText = "";
 
 const AGENT_ORDER = ["architect", "developer", "qa", "reviewer", "devops"];
 const DEFAULT_CHECKED = new Set(["developer", "qa"]);
@@ -262,6 +265,7 @@ function renderRow(task) {
     <td>${badge(task.status)}</td>
     <td class="muted">${task.agent || "-"}</td>
     <td class="muted">${(task.metadata && task.metadata.runtime_override) || "default"}</td>
+    <td class="muted" style="font-family: var(--mono); font-size: 11px;">${task.branch || "-"}</td>
     <td class="muted">${task.step ?? 0}</td>
     <td class="muted">${task.priority}</td>
     <td class="muted">${fmtTime(task.updated_at)}</td>
@@ -302,24 +306,73 @@ async function openDetail(id) {
   statusEl.className = "badge st-" + t.status;
   statusEl.textContent = t.status;
 
+  const branchEl = document.getElementById("detail-branch");
+  if (t.branch) {
+    branchEl.textContent = `branch: ${t.branch} (work lands here, not on main — check it out or open a PR to see it)`;
+  } else if (t.status === "COMPLETED" || t.status === "FAILED" || t.status === "BLOCKED") {
+    // A finished task should always have a branch; its absence usually
+    // means the running server is older than the fix that records it —
+    // restart the daemon/desktop app to pick that up.
+    branchEl.textContent = "branch: (not recorded — restart ai-squad to pick up the latest fix)";
+  } else {
+    branchEl.textContent = "";
+  }
+
   const lines = [];
   for (const ev of (detail.events || [])) {
-    lines.push({at: ev.created_at, text: `${ev.from_status || "-"} → ${ev.to_status}${ev.reason ? ": " + escapeHtml(ev.reason) : ""}`});
+    const plainReason = ev.reason ? `: ${ev.reason}` : "";
+    lines.push({
+      at: ev.created_at,
+      text: `${ev.from_status || "-"} → ${ev.to_status}${ev.reason ? ": " + escapeHtml(ev.reason) : ""}`,
+      textPlain: `${ev.from_status || "-"} -> ${ev.to_status}${plainReason}`,
+    });
   }
   for (const r of (detail.runs || [])) {
     const cost = r.usage && r.usage.cost_usd != null ? ` cost=$${r.usage.cost_usd.toFixed(4)}` : "";
-    lines.push({at: r.finished_at, text: `run agent=${r.agent} status=${r.status} duration=${fmtDuration(r.duration)}${cost}`});
+    const errSuffix = r.error ? ` error=${r.error}` : "";
+    const runLine = `run agent=${r.agent} status=${r.status} duration=${fmtDuration(r.duration)}${cost}${errSuffix}`;
+    lines.push({at: r.finished_at, text: escapeHtml(runLine), textPlain: runLine});
   }
   lines.sort((a, b) => (a.at || "").localeCompare(b.at || ""));
 
   document.getElementById("detail-timeline").innerHTML = lines.map(l =>
     `<div class="row"><span class="t">${fmtTime(l.at)}</span><span>${l.text}</span></div>`
   ).join("") || `<div class="muted">No history yet.</div>`;
+
+  // Plain text, built separately from the HTML-escaped display lines above,
+  // so "Copy logs" and Cmd+C both yield clean text with no HTML entities.
+  currentLogText = `${t.id} — ${t.title} [${t.status}]\n` +
+    lines.map(l => `${fmtTime(l.at)}  ${l.textPlain}`).join("\n");
 }
 
 document.getElementById("detail-close").addEventListener("click", () => {
   selectedTaskId = null;
   document.getElementById("detail").classList.remove("open");
+});
+
+document.getElementById("detail-copy").addEventListener("click", async () => {
+  const btn = document.getElementById("detail-copy");
+  const original = btn.textContent;
+  try {
+    // The Clipboard API's write half needs no special allowance beyond what
+    // this webview already grants (javaScriptCanAccessClipboard) — unlike
+    // paste, which needs the OS-level route this app otherwise lacks (see
+    // the keydown handler below), so this button works independently of
+    // that limitation.
+    await navigator.clipboard.writeText(currentLogText);
+  } catch {
+    // Fallback for environments where the async Clipboard API is blocked:
+    // select the timeline's own text and use the older execCommand route.
+    const range = document.createRange();
+    range.selectNodeContents(document.getElementById("detail-timeline"));
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+    document.execCommand("copy");
+    sel.removeAllRanges();
+  }
+  btn.textContent = "Copied!";
+  setTimeout(() => { btn.textContent = original; }, 1200);
 });
 document.getElementById("detail-cancel").addEventListener("click", async () => {
   if (!selectedTaskId) return;
@@ -425,20 +478,33 @@ function connect() {
 // works natively.
 window.addEventListener("keydown", (e) => {
   if (!(e.metaKey || e.ctrlKey)) return;
+  const key = e.key.toLowerCase();
   const target = e.target;
   const isEditable = target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA");
-  if (!isEditable) return;
 
-  const commands = {v: "paste", c: "copy", x: "cut", a: "selectAll"};
-  const cmd = commands[e.key.toLowerCase()];
-  if (!cmd) return;
-
-  if (cmd === "selectAll") {
-    target.select();
-  } else {
-    document.execCommand(cmd);
+  // Copy has no editable-field requirement: it acts on whatever text is
+  // currently selected, whether that's inside a form field or plain
+  // read-only text (e.g. the log timeline in the task detail panel) — the
+  // earlier version of this handler only fired inside INPUT/TEXTAREA,
+  // which is why copying selected log text did nothing.
+  if (key === "c") {
+    document.execCommand("copy");
+    e.preventDefault();
+    return;
   }
-  e.preventDefault();
+
+  // Paste and cut only make sense with an editable target to act on.
+  if (!isEditable) return;
+  if (key === "v") {
+    document.execCommand("paste");
+    e.preventDefault();
+  } else if (key === "x") {
+    document.execCommand("cut");
+    e.preventDefault();
+  } else if (key === "a") {
+    target.select();
+    e.preventDefault();
+  }
 });
 
 loadAgents();

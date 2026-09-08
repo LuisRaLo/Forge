@@ -38,6 +38,66 @@ func TestToolArgsFilesystemWorkspace(t *testing.T) {
 	}
 }
 
+// TestToolArgsWorkspaceWithScopedShellStaysWritable is a regression test for
+// a real, reproduced-live bug: --allowedTools is NOT additive — once it
+// carries any entry, every tool not explicitly named becomes unavailable,
+// overriding whatever would otherwise be available by default. A prior
+// version of toolArgs added only the scoped Bash(cmd:*) patterns to
+// `allowed` and assumed Edit/Write stayed available by omission; in
+// practice this made every FSWorkspace agent with a scoped shell allowlist
+// (developer, qa) unable to write anything at all, confirmed by running the
+// exact resulting flags against the installed CLI (denials for both Write
+// and Bash, "running in don't ask mode"). The old tests here only checked
+// that Edit/Write were absent from `disallowed`, never that they were
+// present in `allowed` once a scoped shell forced --allowedTools into use —
+// which is the exact condition that broke.
+func TestToolArgsWorkspaceWithScopedShellStaysWritable(t *testing.T) {
+	t.Parallel()
+	allowed, disallowed := toolArgs(core.Permissions{
+		Filesystem: core.FSWorkspace,
+		Shell:      core.ShellPolicy{Enabled: true, Commands: []string{"git"}},
+	})
+	for _, want := range []string{toolRead, toolEdit, toolWrite, toolNotebookEdit, toolGlob, toolGrep} {
+		if !contains(allowed, want) {
+			t.Errorf("a scoped shell must not implicitly exclude %s from --allowedTools, got %v", want, allowed)
+		}
+	}
+	if contains(disallowed, toolEdit) || contains(disallowed, toolWrite) {
+		t.Errorf("FSWorkspace must not disallow Edit/Write, got %v", disallowed)
+	}
+}
+
+// TestToolArgsReadWithScopedShellStaysReadable mirrors the above for
+// FSRead: a read-only agent that also has a scoped shell (e.g. qa running
+// `go test`) must still be able to Read once --allowedTools is in play.
+func TestToolArgsReadWithScopedShellStaysReadable(t *testing.T) {
+	t.Parallel()
+	allowed, _ := toolArgs(core.Permissions{
+		Filesystem: core.FSRead,
+		Shell:      core.ShellPolicy{Enabled: true, Commands: []string{"go"}},
+	})
+	for _, want := range []string{toolRead, toolGlob, toolGrep} {
+		if !contains(allowed, want) {
+			t.Errorf("a scoped shell must not implicitly exclude %s from --allowedTools, got %v", want, allowed)
+		}
+	}
+}
+
+// TestToolArgsNetworkWithScopedShellStaysReachable mirrors the same
+// principle for network:true — an agent like devops needs WebFetch/WebSearch
+// explicitly present in --allowedTools once its shell allowlist forces that
+// flag into use, not merely absent from --disallowedTools.
+func TestToolArgsNetworkWithScopedShellStaysReachable(t *testing.T) {
+	t.Parallel()
+	allowed, _ := toolArgs(core.Permissions{
+		Network: true,
+		Shell:   core.ShellPolicy{Enabled: true, Commands: []string{"git"}},
+	})
+	if !contains(allowed, toolWebFetch) || !contains(allowed, toolWebSearch) {
+		t.Errorf("network:true with a scoped shell must include web tools in --allowedTools, got %v", allowed)
+	}
+}
+
 func TestToolArgsShellDenied(t *testing.T) {
 	t.Parallel()
 	_, disallowed := toolArgs(core.Permissions{Shell: core.ShellPolicy{Enabled: false}})
@@ -98,14 +158,17 @@ func TestToolArgsMatchesShippedAgentDefinitions(t *testing.T) {
 
 	// The developer ships with workspace write, a shell allowlist and no
 	// network: git and go must be reachable, curl must not exist as a bare
-	// Bash grant, and web tools must be off.
+	// Bash grant, and web tools must be off. Critically, Edit/Write must be
+	// in the ALLOWED list, not merely absent from disallowed — see
+	// TestToolArgsWorkspaceWithScopedShellStaysWritable for why that
+	// distinction is the one that actually matters.
 	allowed, disallowed := toolArgs(core.Permissions{
 		Filesystem: core.FSWorkspace,
 		Shell:      core.ShellPolicy{Enabled: true, Commands: []string{"go", "git", "make"}},
 		Network:    false,
 	})
-	if contains(disallowed, toolEdit) || contains(disallowed, toolWrite) {
-		t.Error("developer-shaped permissions must keep Edit/Write available")
+	if !contains(allowed, toolEdit) || !contains(allowed, toolWrite) {
+		t.Errorf("developer-shaped permissions must explicitly allow Edit/Write, got %v", allowed)
 	}
 	if !contains(allowed, "Bash(git:*)") {
 		t.Error("developer-shaped permissions must scope Bash to git")

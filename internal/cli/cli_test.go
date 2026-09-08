@@ -416,8 +416,13 @@ func TestWorkerStartDrainsASingleStepTaskToCompletion(t *testing.T) {
 	mustRun(t, cfg, "init")
 	mockConfig(t, cfg)
 
+	// architect (read-only, no git_write) rather than developer: the mock
+	// runtime never touches the real filesystem, and the scheduler now
+	// verifies a git_write-permitted step actually changed something (see
+	// docs/architecture.md) — this test is about worker mechanics, not
+	// that verification, so it uses an agent the check does not apply to.
 	repo := newTestRepo(t)
-	mustRun(t, cfg, "task", "create", "--title", "solo", "--repo", repo, "--agent", "developer")
+	mustRun(t, cfg, "task", "create", "--title", "solo", "--repo", repo, "--agent", "architect")
 
 	out := mustRun(t, cfg, "worker", "start")
 	if !strings.Contains(out, "done") {
@@ -451,7 +456,7 @@ func TestLogsShowsStateAndRunHistory(t *testing.T) {
 	mockConfig(t, cfg)
 
 	repo := newTestRepo(t)
-	mustRun(t, cfg, "task", "create", "--title", "logged", "--repo", repo, "--agent", "developer")
+	mustRun(t, cfg, "task", "create", "--title", "logged", "--repo", repo, "--agent", "architect")
 	mustRun(t, cfg, "worker", "start")
 
 	out := mustRun(t, cfg, "logs", "TASK-1")

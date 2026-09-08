@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"strconv"
 	"strings"
 )
 
@@ -199,4 +200,42 @@ func (c *Client) Push(ctx context.Context, dir, remote, branch string) error {
 // CurrentBranch returns the branch checked out at dir.
 func (c *Client) CurrentBranch(ctx context.Context, dir string) (string, error) {
 	return c.run(ctx, dir, "rev-parse", "--abbrev-ref", "HEAD")
+}
+
+// HeadCommit returns the commit hash HEAD points to at dir.
+func (c *Client) HeadCommit(ctx context.Context, dir string) (string, error) {
+	return c.run(ctx, dir, "rev-parse", "HEAD")
+}
+
+// IsDirty reports whether dir has uncommitted changes (staged, unstaged, or
+// untracked).
+func (c *Client) IsDirty(ctx context.Context, dir string) (bool, error) {
+	out, err := c.run(ctx, dir, "status", "--porcelain")
+	if err != nil {
+		return false, err
+	}
+	return out != "", nil
+}
+
+// CommitsSince counts commits reachable from HEAD but not from baseCommit —
+// i.e. how far dir's current branch has moved beyond a known starting point.
+func (c *Client) CommitsSince(ctx context.Context, dir, baseCommit string) (int, error) {
+	out, err := c.run(ctx, dir, "rev-list", "--count", baseCommit+"..HEAD")
+	if err != nil {
+		return 0, err
+	}
+	n, convErr := strconv.Atoi(out)
+	if convErr != nil {
+		return 0, fmt.Errorf("parse commit count %q: %w", out, convErr)
+	}
+	return n, nil
+}
+
+// MergeBase returns the commit where refA and refB diverged. Worktrees of
+// the same repository share one object database, so this can be computed
+// from any worktree's directory regardless of which one refA/refB actually
+// belong to — including a branch created moments earlier in a different
+// worktree via `git worktree add -b`.
+func (c *Client) MergeBase(ctx context.Context, dir, refA, refB string) (string, error) {
+	return c.run(ctx, dir, "merge-base", refA, refB)
 }

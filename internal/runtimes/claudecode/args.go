@@ -106,14 +106,45 @@ func buildArgs(req core.RunRequest, opts buildOpts) []string {
 // toolArgs derives allowed/disallowed Claude Code tool names from an agent's
 // permissions. This is a policy layer on top of the CLI's own gate, not a
 // hard sandbox — see the package doc comment in runtime.go.
+// toolArgs derives allowed/disallowed Claude Code tool names from an agent's
+// permissions.
+//
+// --allowedTools is NOT additive: reproduced directly against the installed
+// CLI while debugging a real failure — a developer-shaped agent (workspace
+// filesystem, a scoped shell allowlist) had Write and Bash both denied with
+// "Claude Code is running in don't ask mode," even though neither was ever
+// named in --disallowedTools, because --allowedTools had been given ONLY the
+// scoped Bash(cmd:*) patterns. Once --allowedTools carries any entry at all,
+// every built-in tool not explicitly listed becomes unavailable, overriding
+// whatever would otherwise be available by default. The old version of this
+// function only ever added Bash(cmd:*) patterns to allowed and assumed
+// Read/Edit/Write stayed available by omission — that assumption was wrong,
+// and it broke every agent with both FSWorkspace and a scoped shell list
+// (developer, qa — both shipped agents that need to write files).
+//
+// The fix: whenever a scoped shell allowlist forces --allowedTools to be
+// used at all, every OTHER tool this permission set grants is added to it
+// explicitly too, so nothing is implicitly excluded. The flip side, and a
+// deliberate one: a built-in tool this permission model has no opinion
+// about (something outside filesystem/shell/network) is then also
+// unavailable — fail closed, consistent with this project's own security
+// stance, rather than silently falling through to whatever Claude Code
+// considers "default."
 func toolArgs(p core.Permissions) (allowed, disallowed []string) {
+	usesAllowlist := len(p.Shell.Commands) > 0
+
 	switch p.Filesystem {
 	case core.FSNone, "":
 		disallowed = append(disallowed, toolRead, toolEdit, toolWrite, toolNotebookEdit, toolGlob, toolGrep)
 	case core.FSRead:
+		if usesAllowlist {
+			allowed = append(allowed, toolRead, toolGlob, toolGrep)
+		}
 		disallowed = append(disallowed, toolEdit, toolWrite, toolNotebookEdit)
 	case core.FSWorkspace:
-		// The full filesystem tool set stays available.
+		if usesAllowlist {
+			allowed = append(allowed, toolRead, toolEdit, toolWrite, toolNotebookEdit, toolGlob, toolGrep)
+		}
 	}
 
 	switch {
@@ -127,6 +158,8 @@ func toolArgs(p core.Permissions) (allowed, disallowed []string) {
 
 	if !p.Network {
 		disallowed = append(disallowed, toolWebFetch, toolWebSearch)
+	} else if usesAllowlist {
+		allowed = append(allowed, toolWebFetch, toolWebSearch)
 	}
 
 	return allowed, disallowed

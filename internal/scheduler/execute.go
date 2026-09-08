@@ -36,6 +36,20 @@ func (s *Scheduler) execute(ctx context.Context, t *core.Task) {
 		return
 	}
 
+	// Persist the workspace's actual branch and path onto the task record.
+	// Without this, task.Branch stays permanently empty — the CLI and
+	// dashboard have no way to tell an operator where a task's work
+	// actually landed (ai-squad/task-N, never main), which is exactly the
+	// kind of "it says success but I don't see anything" confusion this is
+	// meant to head off.
+	if t.Branch != ws.Branch || t.WorkspacePath != ws.Path {
+		t.Branch = ws.Branch
+		t.WorkspacePath = ws.Path
+		if err := s.deps.Tasks.Save(ctx, t); err != nil {
+			s.log.Error("record workspace branch on task", "task", t.ID, "error", err)
+		}
+	}
+
 	stepID := core.StepID(t.Workflow, t.Step, t.Agent, t.Attempts+1)
 
 	runCtx := ctx
@@ -246,6 +260,27 @@ type gateVerdict struct {
 // COMPLETED if this was the last step. The workspace is released only once
 // the task reaches a state that will never resume in it.
 func (s *Scheduler) advance(ctx context.Context, t *core.Task, def *core.AgentDefinition, ws *workspace.Workspace, result *core.RunResult) {
+	// A step that can write to the workspace but changed nothing at all is
+	// not a success, whatever the runtime's own exit status says — a
+	// process exiting cleanly only means the CLI call didn't crash, not
+	// that the agent actually did the work. This is the objective check
+	// behind that: count commits and check for uncommitted changes via
+	// git directly, rather than trusting the runtime's stop_reason or
+	// (worse) parsing the agent's own prose for whether it thinks it
+	// succeeded — exactly the kind of guess this project's gate-verdict
+	// handling above already refuses to make.
+	if def.Permissions.GitWrite && s.deps.Git != nil && ws.BaseCommit != "" {
+		changed, err := s.hasRealChanges(ctx, ws)
+		if err != nil {
+			s.log.Warn("could not verify workspace changes", "task", t.ID, "error", err)
+		} else if !changed {
+			s.failTask(ctx, t, fmt.Errorf(
+				"step %s reported success but made no changes to the workspace "+
+					"(no new commits, nothing uncommitted) — nothing to advance on", def.Name))
+			return
+		}
+	}
+
 	if def.Gate.Enabled {
 		verdict, err := parseGateVerdict(result.Structured)
 		if err != nil {
@@ -385,6 +420,25 @@ func (s *Scheduler) stepInfo(t *core.Task) (steps []string, last bool, err error
 		return nil, false, err
 	}
 	return steps, t.Step >= len(steps)-1, nil
+}
+
+// hasRealChanges reports whether ws has moved beyond its recorded fork
+// point: any commits ahead of BaseCommit, or any uncommitted changes sitting
+// in the working tree (the agent wrote something but didn't get to commit
+// it — still evidence of real work, not nothing).
+func (s *Scheduler) hasRealChanges(ctx context.Context, ws *workspace.Workspace) (bool, error) {
+	commits, err := s.deps.Git.CommitsSince(ctx, ws.Path, ws.BaseCommit)
+	if err != nil {
+		return false, fmt.Errorf("count commits: %w", err)
+	}
+	if commits > 0 {
+		return true, nil
+	}
+	dirty, err := s.deps.Git.IsDirty(ctx, ws.Path)
+	if err != nil {
+		return false, fmt.Errorf("check working tree: %w", err)
+	}
+	return dirty, nil
 }
 
 func parseGateVerdict(structured json.RawMessage) (*gateVerdict, error) {

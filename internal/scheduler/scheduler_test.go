@@ -895,3 +895,34 @@ func TestPerTaskRuntimeOverrideRoutesExecution(t *testing.T) {
 		}
 	}
 }
+
+func TestExecutePersistsWorkspaceBranchOntoTask(t *testing.T) {
+	t.Parallel()
+	env := newTestEnv(t, Config{}, devAgent())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	task := env.svc.create(t, ctx, &core.Task{
+		Title: "branch visibility", Repository: "/repo", Workflow: "solo", Agent: "developer",
+	})
+
+	go env.sched.Run(ctx)
+
+	waitFor(t, 2*time.Second, func() bool {
+		got, err := env.tasks.Get(ctx, task.ID)
+		return err == nil && got.Status == core.StatusCompleted
+	})
+
+	got, err := env.tasks.Get(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	// fakeWorkspaces derives "ai-squad/<task-id>" — see newTestEnv.
+	wantBranch := "ai-squad/" + task.ID
+	if got.Branch != wantBranch {
+		t.Errorf("expected task.Branch %q persisted, got %q", wantBranch, got.Branch)
+	}
+	if got.WorkspacePath == "" {
+		t.Error("expected task.WorkspacePath persisted")
+	}
+}

@@ -2,6 +2,7 @@ package git
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
@@ -330,5 +331,104 @@ func TestCurrentBranch(t *testing.T) {
 	}
 	if got != "main" {
 		t.Errorf("expected main, got %s", got)
+	}
+}
+
+func TestHeadCommit(t *testing.T) {
+	t.Parallel()
+	c := New()
+	repo := newTestRepo(t)
+
+	got, err := c.HeadCommit(context.Background(), repo)
+	if err != nil {
+		t.Fatalf("head commit: %v", err)
+	}
+	if len(got) != 40 {
+		t.Errorf("expected a full 40-char commit hash, got %q", got)
+	}
+}
+
+func TestIsDirty(t *testing.T) {
+	t.Parallel()
+	c := New()
+	repo := newTestRepo(t)
+	ctx := context.Background()
+
+	dirty, err := c.IsDirty(ctx, repo)
+	if err != nil {
+		t.Fatalf("is dirty: %v", err)
+	}
+	if dirty {
+		t.Error("a freshly committed repo should not be dirty")
+	}
+
+	if err := os.WriteFile(filepath.Join(repo, "untracked.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	dirty, err = c.IsDirty(ctx, repo)
+	if err != nil {
+		t.Fatalf("is dirty: %v", err)
+	}
+	if !dirty {
+		t.Error("an untracked file should make the repo dirty")
+	}
+}
+
+func TestCommitsSince(t *testing.T) {
+	t.Parallel()
+	c := New()
+	repo := newTestRepo(t)
+	ctx := context.Background()
+
+	base, err := c.HeadCommit(ctx, repo)
+	if err != nil {
+		t.Fatalf("head commit: %v", err)
+	}
+
+	n, err := c.CommitsSince(ctx, repo, base)
+	if err != nil {
+		t.Fatalf("commits since: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("expected 0 commits since HEAD itself, got %d", n)
+	}
+
+	if err := os.WriteFile(filepath.Join(repo, "new.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	if _, err := c.Commit(ctx, repo, "add new.txt"); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	n, err = c.CommitsSince(ctx, repo, base)
+	if err != nil {
+		t.Fatalf("commits since: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("expected 1 commit since base, got %d", n)
+	}
+}
+
+func TestMergeBase(t *testing.T) {
+	t.Parallel()
+	c := New()
+	repo := newTestRepo(t)
+	ctx := context.Background()
+
+	base, err := c.HeadCommit(ctx, repo)
+	if err != nil {
+		t.Fatalf("head commit: %v", err)
+	}
+
+	if err := c.WorktreeAdd(ctx, repo, filepath.Join(t.TempDir(), "wt"), "feature", ""); err != nil {
+		t.Fatalf("worktree add: %v", err)
+	}
+
+	got, err := c.MergeBase(ctx, repo, "feature", "main")
+	if err != nil {
+		t.Fatalf("merge base: %v", err)
+	}
+	if got != base {
+		t.Errorf("expected merge-base %s, got %s", base, got)
 	}
 }
