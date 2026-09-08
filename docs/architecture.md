@@ -417,6 +417,54 @@ es estimado": the total shown is a floor, not an exact figure, and the
 unknown-run count is what makes that visible rather than asserted in a
 comment only.
 
+## The local dashboard: events, ad hoc steps, desktop shell
+
+Three additions after V1's 8 phases, for a first UI:
+
+**Ad hoc step lists** (`core.EncodeSteps`/`DecodeSteps`, stored under
+`Task.Metadata[core.StepsMetadataKey]`) let a caller compose a one-off
+pipeline — "developer", or "developer,qa", or "developer,qa,devops" — at
+task-creation time, as an alternative to a pre-declared named workflow.
+`tasks.Service.Create` now accepts `Steps []string` alongside `Workflow`
+and `Agent` (exactly one of the three), and `scheduler.resolveSteps`
+unifies lookup across all three sources so `claim.go` and `execute.go`
+never diverge on what "this task's steps" means. This is what backs the
+dashboard's step checkboxes without requiring an operator to pre-declare
+every checkbox combination in `config.yaml`.
+
+**`internal/events`** is a small in-process pub/sub bus, deliberately not
+imported by `internal/core`, `internal/scheduler`, or `internal/storage` —
+publishing is wired in only at `internal/cli`'s edge, via
+`PublishingTaskRepository`, a decorator over `core.TaskRepository` that
+publishes after every successful `Create`/`Transition` (never after a
+rejected one — nothing happened, so nothing is published) and passes every
+read straight through unwrapped. This is what makes the dashboard
+"real-time... cada que hay algo" push-based rather than polling: the
+scheduler has no idea anything is listening, and a slow or stalled
+WebSocket client can never stall the orchestrator, since `Bus.Publish`
+drops rather than blocks on a full subscriber buffer.
+
+**`internal/web`** serves a REST API over the same `tasks.Service`/ports
+every CLI command already uses, plus a `GET /ws` endpoint streaming
+`events.Event` as JSON — first message is a full task snapshot, so a
+freshly opened window has something to render before the next real change.
+The frontend itself (`internal/web/static/index.html`) is one embedded,
+dependency-free HTML file: no build step, no framework, matching "muy
+basico." Verified with a real TCP WebSocket round trip in
+`TestWebSocketSnapshotThenLiveEvent` (the actual `coder/websocket` client
+against an `httptest.Server`), not a mocked transport.
+
+**`ai-squad desktop`** wraps the same server in a native window via
+`github.com/webview/webview_go` (WKWebView on macOS — confirmed compiling
+and linking correctly against Xcode's command line tools on this machine).
+It binds to a random loopback port (`127.0.0.1:0`, never reachable from
+the network) so it can never collide with anything already running,
+backgrounds the scheduler and HTTP server, and blocks the main goroutine on
+webview's native event loop — required, since the OS demands the window
+live on the main thread. Closing the window cancels the shared context,
+stopping the scheduler and server together. `ai-squad serve --addr ...` is
+the identical wiring without the window, for headless/remote use.
+
 ## Deferred deliberately
 
 - **Worktree management** (Phase 3). One workspace per task, never shared.

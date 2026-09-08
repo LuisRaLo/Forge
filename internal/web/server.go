@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"net"
 	"net/http"
 	"time"
 
@@ -150,10 +151,10 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 // taskDetail bundles a task with its history for the detail view, so the
 // frontend needs one request rather than three.
 type taskDetail struct {
-	Task      *core.Task        `json:"task"`
-	Events    []core.TaskEvent  `json:"events"`
-	Runs      []*core.AgentRun  `json:"runs"`
-	Artifacts []*core.Artifact  `json:"artifacts"`
+	Task      *core.Task       `json:"task"`
+	Events    []core.TaskEvent `json:"events"`
+	Runs      []*core.AgentRun `json:"runs"`
+	Artifacts []*core.Artifact `json:"artifacts"`
 }
 
 func (s *Server) handleShowTask(w http.ResponseWriter, r *http.Request) {
@@ -290,12 +291,26 @@ func newAgentView(def *core.AgentDefinition, runtime string) agentView {
 // ListenAndServe is a small convenience wrapper so the CLI's `serve` command
 // does not need to construct an http.Server by hand.
 func ListenAndServe(ctx context.Context, addr string, handler http.Handler, log *slog.Logger) error {
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("listen on %s: %w", addr, err)
+	}
+	return Serve(ctx, ln, handler, log)
+}
+
+// Serve runs handler on an already-bound listener until ctx is cancelled,
+// then shuts down gracefully. Taking a net.Listener rather than an address
+// string is what lets a caller bind to a random free port (":0", used by
+// the desktop app so it never collides with anything already running) and
+// still learn which port was actually chosen, via ln.Addr(), before
+// calling this.
+func Serve(ctx context.Context, ln net.Listener, handler http.Handler, log *slog.Logger) error {
 	srv := &http.Server{
-		Addr: addr, Handler: handler,
+		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	errCh := make(chan error, 1)
-	go func() { errCh <- srv.ListenAndServe() }()
+	go func() { errCh <- srv.Serve(ln) }()
 
 	select {
 	case err := <-errCh:

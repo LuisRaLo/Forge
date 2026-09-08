@@ -56,6 +56,8 @@ func NewRootCommand() *cobra.Command {
 		newApproveCommand(resolve),
 		newLogsCommand(resolve),
 		newPRCommand(resolve),
+		newServeCommand(resolve),
+		newDesktopCommand(resolve),
 	)
 	return root
 }

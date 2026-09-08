@@ -11,6 +11,7 @@ import (
 	"github.com/LuisRaLo/ai-squad/internal/agents"
 	"github.com/LuisRaLo/ai-squad/internal/config"
 	"github.com/LuisRaLo/ai-squad/internal/core"
+	"github.com/LuisRaLo/ai-squad/internal/events"
 	"github.com/LuisRaLo/ai-squad/internal/git"
 	"github.com/LuisRaLo/ai-squad/internal/runtimes"
 	"github.com/LuisRaLo/ai-squad/internal/scheduler"
@@ -32,6 +33,8 @@ type App struct {
 	Workspaces *workspace.Manager
 	Tasks      *tasks.Service
 	Scheduler  *scheduler.Scheduler
+	Events     *events.Bus
+	Log        *slog.Logger
 
 	logFile *os.File
 }
@@ -111,7 +114,14 @@ func open(ctx context.Context, configPath string) (*App, error) {
 		return nil, err
 	}
 
-	repo := storage.NewTaskRepo(db, core.SystemClock)
+	// repo is always wrapped to publish task events, even for commands that
+	// never look at them: publishing to a bus with no subscribers is just an
+	// empty loop, so there is no reason to special-case `serve` here. This
+	// is what lets the web dashboard get real-time updates by simply
+	// subscribing, without the scheduler or storage packages ever knowing a
+	// bus exists.
+	bus := &events.Bus{}
+	repo := events.NewPublishingTaskRepository(storage.NewTaskRepo(db, core.SystemClock), bus)
 	runRepo := storage.NewRunRepo(db)
 	artifactRepo := storage.NewArtifactRepo(db, core.SystemClock)
 
@@ -144,7 +154,7 @@ func open(ctx context.Context, configPath string) (*App, error) {
 	return &App{
 		Cfg: cfg, DB: db, Repo: repo, Runs: runRepo, Artifacts: artifactRepo,
 		Agents: registry, Runtimes: runtimeRegistry, Workspaces: workspaces,
-		Tasks: svc, Scheduler: sched, logFile: logFile,
+		Tasks: svc, Scheduler: sched, Events: bus, Log: logger, logFile: logFile,
 	}, nil
 }
 

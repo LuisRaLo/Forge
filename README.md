@@ -85,6 +85,26 @@ They mean different things:
 - Git 2.5+ (worktrees)
 - Optional: Claude Code, Docker, GitHub CLI, Ollama
 
+## Desktop app
+
+```sh
+go build -o ai-squad ./cmd/ai-squad
+./ai-squad init
+./ai-squad desktop
+```
+
+Opens a native window (WKWebView on macOS) showing the live task board:
+drag a spec file (or paste text) into the panel on the left, pick which
+steps to run (a plain checkbox list — "developer" alone, or
+"developer + qa", or "developer + qa + devops", or any combination — no
+need to pre-declare a named workflow), and hit Create & run. The scheduler
+runs in the same process; every state change reaches the window immediately
+over a WebSocket, not by polling. Closing the window stops everything.
+
+`./ai-squad serve --addr 127.0.0.1:8080` runs the identical scheduler +
+dashboard headless (no window) for remote/server use; open that address in
+any browser to get the same UI.
+
 ## Getting started
 
 ```sh
