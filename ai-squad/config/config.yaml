@@ -1,0 +1,92 @@
+# ai-squad configuration.
+#
+# Two blocks describe execution, and they are NOT the same thing:
+#
+#   runtimes:  how an agent step is executed. A runtime may be a full external
+#              agent that owns its own tool loop, permissions and sessions
+#              (type: claude-code), or a loop we drive ourselves on top of a
+#              plain completion API (type: model).
+#
+#   providers: plain chat-completion endpoints with no agent loop of their own.
+#              Only "type: model" runtimes consume these.
+#
+# Secrets are never written here. Name an environment variable with api_key_env;
+# an inline api_key is rejected at load time.
+
+system:
+  # data_dir defaults to the directory holding this file, which keeps an
+  # installation self-contained. Set it explicitly to place the database,
+  # agents and worktrees somewhere else.
+  # data_dir: ~/.ai-squad
+  log_level: info
+  log_format: text
+
+scheduler:
+  max_concurrency: 3
+  poll_interval: 5s
+  lease_duration: 15m
+
+limits:
+  max_task_attempts: 3
+  max_task_duration: 30m
+  # Enforced against reported cost where the runtime provides it, and against
+  # an estimate otherwise. Estimated enforcement is reported as such.
+  max_daily_cost_usd: 20
+  # Bounds the QA/CI feedback loop so it can never spin forever.
+  max_step_iterations: 3
+
+approval:
+  # V1 never deploys to production without a human. This must stay true.
+  require_for_production: true
+
+runtimes:
+  claude:
+    type: claude-code
+    command: claude
+    timeout: 30m
+
+  # A local model-driven runtime. Uncomment once a provider is reachable.
+  # local:
+  #   type: model
+  #   provider: ollama
+
+  # A hosted model-driven runtime.
+  # cloud:
+  #   type: model
+  #   provider: deepseek
+
+providers: {}
+  # ollama:
+  #   type: ollama
+  #   base_url: http://localhost:11434
+  #   model: <set your pulled model, e.g. qwen2.5-coder:14b>
+  #   timeout: 120s
+  #
+  # deepseek:
+  #   type: openai-compatible
+  #   base_url: https://api.deepseek.com/v1
+  #   api_key_env: DEEPSEEK_API_KEY
+  #   model: <set your model>
+
+# Binds each agent definition to a runtime. Everything starts on Claude Code
+# because that is the runtime verified present on this machine; move individual
+# agents onto cheaper runtimes as you bring them up.
+agents:
+  architect:
+    runtime: claude
+  developer:
+    runtime: claude
+  qa:
+    runtime: claude
+  reviewer:
+    runtime: claude
+  devops:
+    runtime: claude
+
+workflows:
+  feature:
+    steps: [architect, developer, qa, reviewer]
+  bugfix:
+    steps: [developer, qa, reviewer]
+  review:
+    steps: [reviewer]

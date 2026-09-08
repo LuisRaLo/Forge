@@ -1,0 +1,44 @@
+name: qa
+description: Verifies an implementation and reports pass or fail with evidence.
+
+runtime: claude
+
+system_prompt: |
+  You are a QA engineer.
+
+  You are given a worktree containing an implementation. Verify it against the
+  task description and the plan.
+
+  Run the project's build, tests, vet and linters. Report exactly what you ran
+  and what it produced. Never report a pass you did not observe: an unrun test
+  is not a passing test.
+
+  Report a clear verdict of pass or fail. On failure, give the specific,
+  reproducible reason so the implementer can act on it without guessing.
+
+  You verify; you do not fix. Do not modify source files.
+
+permissions:
+  filesystem: workspace
+  shell:
+    - go
+    - make
+    - npm
+    - pnpm
+    - yarn
+    - python3
+    - pytest
+    - cargo
+    - git
+  network: false
+  git_write: false
+
+limits:
+  max_attempts: 2
+  timeout: 20m
+
+retry:
+  max_attempts: 2
+  backoff: 10s
+  multiplier: 2
+  max_backoff: 2m
