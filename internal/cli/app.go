@@ -39,6 +39,34 @@ type App struct {
 	logFile *os.File
 }
 
+// CheckRuntimeOverride validates a candidate per-task runtime override
+// (core.RuntimeMetadataKey) against every agent in steps: the override must
+// exist, and its declared capabilities must cover what each step's agent
+// requires (core.AgentDefinition.RequiredCapabilities) — the same
+// capability-negotiation check applied to static config bindings at
+// startup (internal/runtimes.Negotiate), applied here to a dynamic,
+// per-task choice instead. Called once, at task-creation time; the
+// scheduler trusts the answer afterward.
+func (a *App) CheckRuntimeOverride(runtimeName string, steps []string) error {
+	rt, err := a.Runtimes.Runtime(runtimeName)
+	if err != nil {
+		return err
+	}
+	for _, agentName := range steps {
+		def, err := a.Agents.Get(agentName)
+		if err != nil {
+			return err
+		}
+		missing := rt.Capabilities().Missing(def.RequiredCapabilities())
+		if len(missing) > 0 {
+			return fmt.Errorf(
+				"runtime %q cannot run step %q: missing %v: %w",
+				runtimeName, agentName, missing, core.ErrValidation)
+		}
+	}
+	return nil
+}
+
 // workflows adapts the configuration to the tasks.Workflows interface, so the
 // task service never imports the config package.
 type workflows struct{ cfg *config.Config }
@@ -100,6 +128,16 @@ func open(ctx context.Context, configPath string) (*App, error) {
 		return nil, err
 	}
 
+	// taskRuntimeFor is what the scheduler actually calls per step: a
+	// per-task runtime override (chosen at creation time — "who resolves my
+	// spec") wins over the agent's own statically configured binding.
+	taskRuntimeFor := func(t *core.Task) string {
+		if override := t.Metadata[core.RuntimeMetadataKey]; override != "" {
+			return override
+		}
+		return runtimeFor(t.Agent)
+	}
+
 	workspaces, err := workspace.NewManager(workspace.Options{
 		Root: filepath.Join(cfg.System.DataDir, "worktrees"),
 	}, git.New())
@@ -144,7 +182,7 @@ func open(ctx context.Context, configPath string) (*App, error) {
 	}, scheduler.Deps{
 		Tasks: repo, Runs: runRepo, Artifacts: artifactRepo,
 		Agents: registry, Runtimes: runtimeRegistry, Workspaces: workspaces,
-		Workflows: workflows{cfg: cfg}, RuntimeFor: runtimeFor, Log: logger,
+		Workflows: workflows{cfg: cfg}, RuntimeFor: taskRuntimeFor, Log: logger,
 	})
 	if err != nil {
 		_ = db.Close()

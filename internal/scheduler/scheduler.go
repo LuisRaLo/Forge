@@ -75,9 +75,14 @@ type Deps struct {
 	Runtimes   core.RuntimeResolver
 	Workspaces Workspaces
 	Workflows  Workflows
-	// RuntimeFor resolves the runtime name an agent executes on, honouring
-	// any configuration override of the agent's own declared runtime.
-	RuntimeFor func(agentName string) string
+	// RuntimeFor resolves the runtime name a task's current step executes
+	// on: a per-task override (core.RuntimeMetadataKey — "who resolves my
+	// spec," chosen at creation time) wins over the agent's own configured
+	// runtime binding. Compatibility between the override and every step's
+	// agent is validated once at task-creation time by the caller
+	// (internal/web, the CLI), not here — by the time the scheduler asks,
+	// the answer is assumed correct.
+	RuntimeFor func(t *core.Task) string
 	Clock      core.Clock
 	Log        *slog.Logger
 }

@@ -214,3 +214,13 @@ func DecodeSteps(metadata map[string]string) (steps []string, ok bool, err error
 	}
 	return steps, true, nil
 }
+
+// RuntimeMetadataKey is the Task.Metadata key holding a per-task runtime
+// override — which engine (Claude Code, a local Ollama model, a hosted
+// OpenAI-compatible API, ...) resolves this task's pipeline, chosen at
+// creation time instead of inherited from each agent's own configured
+// binding. Compatibility (the override must support every capability every
+// step's agent requires) is validated once, at creation time, by the
+// caller that has access to the runtime registry — internal/core itself
+// has no such registry to check against.
+const RuntimeMetadataKey = "runtime_override"

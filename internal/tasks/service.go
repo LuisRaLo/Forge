@@ -64,7 +64,13 @@ type CreateParams struct {
 	// Workflow for a one-off pipeline (e.g. ["developer", "qa"]) composed at
 	// creation time rather than pre-declared in configuration. Stored on the
 	// task itself (core.StepsMetadataKey), not tied to a named workflow.
-	Steps       []string
+	Steps []string
+	// Runtime is a per-task override naming which configured runtime
+	// resolves every step of this task, in place of each agent's own
+	// statically configured binding. The caller must validate it is
+	// actually compatible before passing it in (see App.CheckRuntimeOverride);
+	// this service stores it as-is.
+	Runtime     string
 	Priority    core.Priority
 	MaxAttempts int
 	ParentTask  string
@@ -111,6 +117,21 @@ func (s *Service) Create(ctx context.Context, p CreateParams) (*core.Task, error
 
 	firstAgent := p.Agent
 	metadata := p.Metadata
+	cloned := false
+	// cloneMetadata gives this call its own metadata map, exactly once, so
+	// Create never mutates a map the caller still holds a reference to.
+	cloneMetadata := func() {
+		if cloned {
+			return
+		}
+		if metadata == nil {
+			metadata = map[string]string{}
+		} else {
+			metadata = maps.Clone(metadata)
+		}
+		cloned = true
+	}
+
 	switch {
 	case hasWorkflow:
 		steps, err := s.resolveWorkflow(p.Workflow)
@@ -131,16 +152,21 @@ func (s *Service) Create(ctx context.Context, p CreateParams) (*core.Task, error
 		if err != nil {
 			return nil, err
 		}
-		if metadata == nil {
-			metadata = map[string]string{}
-		} else {
-			metadata = maps.Clone(metadata)
-		}
+		cloneMetadata()
 		metadata[core.StepsMetadataKey] = encoded
 		firstAgent = p.Steps[0]
 	}
 	if err := s.checkAgentExists(firstAgent); err != nil {
 		return nil, err
+	}
+
+	// Runtime is a per-task override of who resolves this task's pipeline
+	// (see core.RuntimeMetadataKey). Compatibility against the resolved
+	// steps is the caller's responsibility (it has the runtime registry;
+	// this service deliberately does not) — see App.CheckRuntimeOverride.
+	if runtime := strings.TrimSpace(p.Runtime); runtime != "" {
+		cloneMetadata()
+		metadata[core.RuntimeMetadataKey] = runtime
 	}
 
 	repoPath, err := s.resolveRepository(p.Repository)

@@ -138,7 +138,7 @@ func newTestEnv(t *testing.T, cfg Config, defs ...*core.AgentDefinition) *testEn
 	sched, err := New(cfg, Deps{
 		Tasks: taskRepo, Runs: runRepo, Artifacts: artifactRepo,
 		Agents: registry, Runtimes: singleRuntime{rt}, Workspaces: ws, Workflows: workflows,
-		RuntimeFor: func(string) string { return "mock" },
+		RuntimeFor: func(*core.Task) string { return "mock" },
 		Clock:      core.SystemClock, Log: logger,
 	})
 	if err != nil {
@@ -642,7 +642,7 @@ func TestNewRejectsInvalidConfig(t *testing.T) {
 		Runs:  storage.NewRunRepo(mustDB(t)), Artifacts: storage.NewArtifactRepo(mustDB(t), core.SystemClock),
 		Agents: mustRegistry(t), Runtimes: singleRuntime{mock.New("m", nil)},
 		Workspaces: newFakeWorkspaces(), Workflows: fakeWorkflows{},
-		RuntimeFor: func(string) string { return "m" },
+		RuntimeFor: func(*core.Task) string { return "m" },
 	}
 
 	if _, err := New(Config{MaxConcurrency: 0, PollInterval: time.Second, MaxStepIterations: 1}, base); err == nil {

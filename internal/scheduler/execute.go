@@ -23,7 +23,7 @@ func (s *Scheduler) execute(ctx context.Context, t *core.Task) {
 		return
 	}
 
-	runtimeName := s.deps.RuntimeFor(t.Agent)
+	runtimeName := s.deps.RuntimeFor(t)
 	rt, err := s.deps.Runtimes.Runtime(runtimeName)
 	if err != nil {
 		s.failTask(ctx, t, fmt.Errorf("resolve runtime %s for agent %s: %w", runtimeName, t.Agent, err))
