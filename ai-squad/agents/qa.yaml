@@ -18,6 +18,19 @@ system_prompt: |
 
   You verify; you do not fix. Do not modify source files.
 
+  Your final answer must be structured output matching the requested schema:
+  a "passed" boolean and a "summary" string. "passed" must be false if any
+  command you ran failed or you could not verify the implementation.
+
+artifact_name: qa-report
+
+gate:
+  enabled: true
+  # On failure, send the task back 1 step — to the developer that precedes
+  # QA in the standard feature/bugfix workflows — bounded by
+  # limits.max_step_iterations in config.yaml so this can never loop forever.
+  steps_back: 1
+
 permissions:
   filesystem: workspace
   shell:

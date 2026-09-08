@@ -140,6 +140,25 @@ type AgentDefinition struct {
 	Permissions Permissions
 	Limits      Limits
 	Retry       RetryPolicy
+
+	// ArtifactName is the key this step's structured output is saved under
+	// (e.g. "plan", "qa-report"). Defaults to the agent's own Name.
+	ArtifactName string
+
+	// Gate makes this step's outcome control workflow progress, rather than
+	// always advancing on success. A gated step must return structured
+	// output shaped {"passed": bool, ...}; a workflow step failing that
+	// gate is sent back StepsBack steps instead of forward, which is the
+	// mechanism behind the QA feedback loop.
+	Gate GateConfig
+}
+
+// GateConfig configures a workflow gate.
+type GateConfig struct {
+	Enabled bool
+	// StepsBack is how many workflow steps to rewind on a failed gate.
+	// Defaults to 1 (send back to the immediately preceding step).
+	StepsBack int
 }
 
 // Validate checks an agent definition in isolation.
@@ -168,7 +187,26 @@ func (a *AgentDefinition) Validate() error {
 	if a.Retry.MaxAttempts < 0 {
 		return Invalid("retry.max_attempts", "must not be negative")
 	}
+	if a.Gate.Enabled && a.Gate.StepsBack < 0 {
+		return Invalid("gate.steps_back", "must not be negative")
+	}
 	return nil
+}
+
+// EffectiveArtifactName returns ArtifactName, defaulting to the agent's Name.
+func (a *AgentDefinition) EffectiveArtifactName() string {
+	if a.ArtifactName != "" {
+		return a.ArtifactName
+	}
+	return a.Name
+}
+
+// EffectiveGateStepsBack returns Gate.StepsBack, defaulting to 1.
+func (a *AgentDefinition) EffectiveGateStepsBack() int {
+	if a.Gate.StepsBack > 0 {
+		return a.Gate.StepsBack
+	}
+	return 1
 }
 
 // RequiredCapabilities derives the capabilities a runtime must provide in order
@@ -200,6 +238,9 @@ func (a *AgentDefinition) RequiredCapabilities() CapabilitySet {
 	}
 	if a.Limits.MaxCostUSD > 0 {
 		caps[CapabilityCostReporting] = struct{}{}
+	}
+	if a.Gate.Enabled {
+		caps[CapabilityStructuredOutput] = struct{}{}
 	}
 	return caps
 }

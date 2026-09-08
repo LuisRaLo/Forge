@@ -26,6 +26,13 @@ type spec struct {
 	Limits       limitsSpec      `yaml:"limits"`
 	Timeout      *yamlx.Duration `yaml:"timeout"`
 	Retry        retrySpec       `yaml:"retry"`
+	ArtifactName string          `yaml:"artifact_name"`
+	Gate         gateSpec        `yaml:"gate"`
+}
+
+type gateSpec struct {
+	Enabled   bool `yaml:"enabled"`
+	StepsBack int  `yaml:"steps_back"`
 }
 
 type permissionsSpec struct {
@@ -134,6 +141,11 @@ func (s *spec) toDomain(defaultName string) (*core.AgentDefinition, error) {
 		Retry: core.RetryPolicy{
 			MaxAttempts: s.Retry.MaxAttempts,
 			Multiplier:  s.Retry.Multiplier,
+		},
+		ArtifactName: s.ArtifactName,
+		Gate: core.GateConfig{
+			Enabled:   s.Gate.Enabled,
+			StepsBack: s.Gate.StepsBack,
 		},
 	}
 	if timeout != nil {
