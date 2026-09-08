@@ -298,8 +298,9 @@ async function openDetail(id) {
 
   document.getElementById("detail").classList.add("open");
   document.getElementById("detail-id").textContent = t.id + " — " + t.title;
-  document.getElementById("detail-status").outerHTML = badge(t.status);
-  document.getElementById("detail-status").id = "detail-status";
+  const statusEl = document.getElementById("detail-status");
+  statusEl.className = "badge st-" + t.status;
+  statusEl.textContent = t.status;
 
   const lines = [];
   for (const ev of (detail.events || [])) {
@@ -411,6 +412,34 @@ function connect() {
     if (ev.task) upsertTask(ev.task);
   };
 }
+
+// The desktop shell (github.com/webview/webview_go) opens a bare WKWebView
+// with no native NSMenu on macOS — a documented limitation of that library,
+// not something this app configures. Without an Edit menu binding Cmd+V/C/X
+// etc. to the standard paste:/copy:/cut: selectors, those shortcuts often
+// never reach the webview's text fields at all. The underlying library does
+// already enable DOMPasteAllowed and javaScriptCanAccessClipboard (confirmed
+// in its own source), so document.execCommand still works once invoked —
+// this just invokes it ourselves instead of relying on a menu that doesn't
+// exist. Harmless (and unused) in a real browser tab, where Cmd+V already
+// works natively.
+window.addEventListener("keydown", (e) => {
+  if (!(e.metaKey || e.ctrlKey)) return;
+  const target = e.target;
+  const isEditable = target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA");
+  if (!isEditable) return;
+
+  const commands = {v: "paste", c: "copy", x: "cut", a: "selectAll"};
+  const cmd = commands[e.key.toLowerCase()];
+  if (!cmd) return;
+
+  if (cmd === "selectAll") {
+    target.select();
+  } else {
+    document.execCommand(cmd);
+  }
+  e.preventDefault();
+});
 
 loadAgents();
 loadRuntimes();
