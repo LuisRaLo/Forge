@@ -59,6 +59,17 @@ func buildArgs(req core.RunRequest, opts buildOpts) []string {
 		"--output-format", "stream-json",
 		"--verbose",
 		"--permission-mode", firstNonEmpty(opts.permissionMode, defaultPermissionMode),
+		// Without this, the child process picks up whatever CLAUDE.md,
+		// plugins, hooks and custom agents happen to be configured for the
+		// invoking user/workspace — reproduced directly while wiring this
+		// adapter: a run granted only "Bash(echo:*)" saw no Bash tool at
+		// all, and instead had an unrelated custom tool (ToolSearch)
+		// available, because the workspace's own local configuration leaked
+		// in. --safe-mode disables that surface while explicitly leaving
+		// auth, model selection, built-in tools and permissions untouched
+		// (per --help), so OAuth/keychain login keeps working — --bare would
+		// additionally force ANTHROPIC_API_KEY and break that.
+		"--safe-mode",
 	}
 
 	model := effectiveModel(req, opts)

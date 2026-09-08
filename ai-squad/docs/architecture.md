@@ -133,6 +133,51 @@ was caught by the test suite and fixed; a regression test now asserts it.
 Precedence: explicit `system.data_dir` → `AI_SQUAD_DATA_DIR` → the config file's
 directory → `~/.ai-squad`.
 
+## Phase 2: what live testing against Claude Code actually found
+
+Four requests were sent to the real, installed `claude` CLI while wiring
+`internal/runtimes/claudecode`, on top of the three sent in Phase 1 to capture
+its JSON contract. Two of the four surfaced real bugs; a third surfaced an
+environment constraint worth recording plainly rather than hiding.
+
+**Bug 1 — the prompt gets silently swallowed.** `--allowedTools` and
+`--disallowedTools` are variadic (`<tools...>` per `--help`): they consume
+every following bare token until the next flag. The initial implementation
+appended the prompt last, after these lists, and the CLI reported *"Input must
+be provided either through stdin or as a prompt argument"* — the prompt had
+been eaten into the tool list. Fixed by anchoring the prompt immediately after
+`-p`, matching the exact form verified in the Phase 1 probes, and covered by a
+regression test (`TestBuildArgsPromptImmediatelyFollowsPrintFlag`).
+
+**Bug 2 — the child process leaked local configuration.** A run permitted
+only `Bash(echo:*)` produced a session where the model reported no Bash tool
+at all, and instead had `ToolSearch` available — a tool from the *invoking*
+Claude Code session's own harness, not a generic Claude Code built-in. The
+child process was inheriting CLAUDE.md, plugins, hooks and custom agents from
+the ambient environment rather than getting the clean built-in tool set the
+permission mapping in `args.go` assumes. Fixed by always passing
+`--safe-mode`, which disables exactly that surface while explicitly leaving
+"auth, model selection, built-in tools, and permissions" working per
+`--help` — `--bare` was rejected for the same fix because its own help text
+says it forces `ANTHROPIC_API_KEY` and stops honouring OAuth/keychain login,
+which is how this machine is actually authenticated (`apiKeySource: "none"`
+in the Phase 1 probe).
+
+**Finding, not a bug — an account-level tool policy.** Even with
+`--safe-mode`, the scoped Bash grant still did not produce a session with a
+`Bash` tool. The available tools instead matched this outer harness's own
+deferred-tool set (`ToolSearch`, `TaskCreate`, `DesignSync`, ...). `--help`
+notes that `--safe-mode` leaves "admin-managed (policy) settings" in force;
+that layer appears to replace the classic built-in toolset on this
+account/machine with a curated, account-specific one that this adapter has no
+way to see around. This is not something more request-tuning would fix, so
+further paid live calls were stopped rather than spent chasing it. Net
+effect: `toolArgs` in `args.go` is verified correct in its *construction*
+(confirmed unit-tested against every permission combination) and against the
+documented, unmanaged CLI contract, but **not independently confirmed against
+a policy-managed account** — that remains open, flagged in code, rather than
+asserted.
+
 ## Deferred deliberately
 
 - **Worktree management** (Phase 3). One workspace per task, never shared.

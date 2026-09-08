@@ -26,6 +26,28 @@ import (
 	"github.com/santillana/ai-squad/internal/core"
 )
 
+// Verified and unverified, as of live testing against Claude Code 2.1.236 on
+// this machine (see docs/architecture.md for the full account):
+//
+//   - Process lifecycle, NDJSON stream parsing, cost/usage/session
+//     extraction, and --safe-mode's effect on CLAUDE.md/plugin isolation:
+//     confirmed end to end against the real CLI.
+//   - The prompt-placement fix (a variadic --allowedTools/--disallowedTools
+//     silently swallows a trailing prompt) and the --safe-mode fix (a plain
+//     run without it leaked an unrelated custom tool set) were both found by
+//     running real requests, not inferred.
+//   - The exact tool NAMES available for shell execution (assumed here to be
+//     "Bash", per generic Claude Code documentation) could not be confirmed
+//     on this machine: even with --safe-mode, a scoped Bash(echo:*) grant
+//     produced a session whose available tools matched this very outer
+//     harness's own deferred-tool set rather than the classic built-in
+//     toolset, which --help attributes to "admin-managed (policy) settings"
+//     surviving --safe-mode. That is an account/environment-level
+//     configuration this adapter has no way to see around, not a defect in
+//     the request it sends. Treat the toolArgs mapping in args.go as correct
+//     against the documented, unmanaged CLI and unverified against a
+//     policy-managed account until confirmed on one.
+
 // Config configures one Claude Code runtime instance.
 type Config struct {
 	// Name is the runtime's identity in logs and task records.
