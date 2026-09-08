@@ -2,10 +2,14 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/santillana/ai-squad/internal/core"
 )
 
 // run executes the command tree with the given arguments against an isolated
@@ -351,5 +355,155 @@ func TestWorkflowStepsMustNameRealAgents(t *testing.T) {
 
 	if _, err := run(t, cfg, "config", "validate"); err == nil {
 		t.Fatal("a workflow referencing a missing agent must be rejected at load time")
+	}
+}
+
+// newTestRepo creates a real, minimal git repository, since workspace
+// acquisition (exercised once the scheduler actually runs a step) correctly
+// refuses a directory that is not one — see internal/workspace's own tests.
+func newTestRepo(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	for _, args := range [][]string{
+		{"init", "-q", "-b", "main"},
+		{"config", "user.name", "test"},
+		{"config", "user.email", "test@example.com"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatalf("write README: %v", err)
+	}
+	commit := exec.Command("git", "add", "README.md")
+	commit.Dir = dir
+	if out, err := commit.CombinedOutput(); err != nil {
+		t.Fatalf("git add: %v\n%s", err, out)
+	}
+	commit = exec.Command("git", "commit", "-q", "-m", "initial commit")
+	commit.Dir = dir
+	if out, err := commit.CombinedOutput(); err != nil {
+		t.Fatalf("git commit: %v\n%s", err, out)
+	}
+	return dir
+}
+
+// mockConfig points every runtime at the in-process mock runtime, so
+// scheduler-driven CLI tests need no external process and cost nothing.
+func mockConfig(t *testing.T, cfg string) {
+	t.Helper()
+	body, err := os.ReadFile(cfg)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	replaced := strings.Replace(string(body),
+		"runtimes:\n  claude:\n    type: claude-code\n    command: claude\n    timeout: 30m",
+		"runtimes:\n  claude:\n    type: mock", 1)
+	if replaced == string(body) {
+		t.Fatal("mockConfig: shipped config.yaml no longer matches the expected claude-code block")
+	}
+	if err := os.WriteFile(cfg, []byte(replaced), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+}
+
+func TestWorkerStartDrainsASingleStepTaskToCompletion(t *testing.T) {
+	t.Parallel()
+	cfg := newWorkspace(t)
+	mustRun(t, cfg, "init")
+	mockConfig(t, cfg)
+
+	repo := newTestRepo(t)
+	mustRun(t, cfg, "task", "create", "--title", "solo", "--repo", repo, "--agent", "developer")
+
+	out := mustRun(t, cfg, "worker", "start")
+	if !strings.Contains(out, "done") {
+		t.Errorf("expected worker start to report completion, got:\n%s", out)
+	}
+
+	list := mustRun(t, cfg, "task", "list")
+	if !strings.Contains(list, "COMPLETED") {
+		t.Errorf("expected the task to reach COMPLETED, got:\n%s", list)
+	}
+}
+
+func TestWorkerStatusReportsQueueDepth(t *testing.T) {
+	t.Parallel()
+	cfg := newWorkspace(t)
+	mustRun(t, cfg, "init")
+	mockConfig(t, cfg)
+
+	out := mustRun(t, cfg, "worker", "status")
+	for _, want := range []string{"Max concurrency", "Claimable"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("worker status missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestLogsShowsStateAndRunHistory(t *testing.T) {
+	t.Parallel()
+	cfg := newWorkspace(t)
+	mustRun(t, cfg, "init")
+	mockConfig(t, cfg)
+
+	repo := newTestRepo(t)
+	mustRun(t, cfg, "task", "create", "--title", "logged", "--repo", repo, "--agent", "developer")
+	mustRun(t, cfg, "worker", "start")
+
+	out := mustRun(t, cfg, "logs", "TASK-1")
+	if !strings.Contains(out, "state") || !strings.Contains(out, "run") {
+		t.Errorf("expected both state and run entries, got:\n%s", out)
+	}
+	if !strings.Contains(out, "COMPLETED") {
+		t.Errorf("expected the completion event in the log, got:\n%s", out)
+	}
+}
+
+func TestLogsRejectsUnknownTask(t *testing.T) {
+	t.Parallel()
+	cfg := newWorkspace(t)
+	mustRun(t, cfg, "init")
+
+	if _, err := run(t, cfg, "logs", "TASK-404"); err == nil {
+		t.Fatal("expected an error for an unknown task")
+	}
+}
+
+func TestApproveCompletesAWaitingApprovalTask(t *testing.T) {
+	t.Parallel()
+	cfg := newWorkspace(t)
+	mustRun(t, cfg, "init")
+	mockConfig(t, cfg)
+
+	repo := t.TempDir()
+	mustRun(t, cfg, "task", "create", "--title", "needs approval", "--repo", repo, "--agent", "developer")
+
+	// Walk the task to WAITING_APPROVAL directly via valid state-machine
+	// edges (PENDING -> READY -> RUNNING -> WAITING_APPROVAL). Reaching this
+	// state through an actual CI/staging pipeline is Phase 7's concern;
+	// here we're testing `approve` itself, not how a task gets staged.
+	app, err := open(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	ctx := context.Background()
+	for _, to := range []core.TaskStatus{core.StatusReady, core.StatusRunning, core.StatusWaitingApproval} {
+		if _, err := app.Repo.Transition(ctx, "TASK-1", to, "test setup", nil); err != nil {
+			t.Fatalf("stage task to %s: %v", to, err)
+		}
+	}
+	app.Close()
+
+	out := mustRun(t, cfg, "approve", "TASK-1", "--by", "test-user", "--note", "looks good")
+	if !strings.Contains(out, "COMPLETED") || !strings.Contains(out, "test-user") {
+		t.Errorf("unexpected approve output: %s", out)
+	}
+
+	if _, err := run(t, cfg, "approve", "TASK-1"); err == nil {
+		t.Fatal("approving an already-completed task must be rejected")
 	}
 }

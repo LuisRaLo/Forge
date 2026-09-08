@@ -155,7 +155,7 @@ func (s *Scheduler) RunOnce(ctx context.Context) error {
 	// guards a single supervised pass against hanging forever if it ever
 	// doesn't.
 	const maxPasses = 10_000
-	for i := 0; i < maxPasses; i++ {
+	for range maxPasses {
 		if !s.hasClaimableWork(ctx) {
 			return nil
 		}

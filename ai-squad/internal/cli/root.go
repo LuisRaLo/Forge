@@ -9,7 +9,7 @@ import (
 
 // Version is the build version, overridable at link time with:
 //
-//	go build -ldflags "github.com/santillana/ai-squad/internal/cli.Version=v0.1.0"
+//	go build -ldflags "-X github.com/santillana/ai-squad/internal/cli.Version=v0.1.0"
 var Version = "dev"
 
 // Execute builds the command tree and runs it, returning the process exit code.
@@ -51,6 +51,10 @@ func NewRootCommand() *cobra.Command {
 		newAgentCommand(resolve),
 		newStatusCommand(resolve),
 		newConfigCommand(resolve),
+		newWorkerCommand(resolve),
+		newDaemonCommand(resolve),
+		newApproveCommand(resolve),
+		newLogsCommand(resolve),
 	)
 	return root
 }

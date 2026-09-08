@@ -17,6 +17,7 @@ func newAgentCommand(configPath func() string) *cobra.Command {
 	cmd.AddCommand(
 		newAgentListCommand(configPath),
 		newAgentShowCommand(configPath),
+		newAgentRunCommand(configPath),
 	)
 	return cmd
 }
